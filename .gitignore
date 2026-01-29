@@ -42,3 +42,6 @@ progress.md
 # sbt launcher (copy from spark/build/ on demand)
 build/sbt-launch-*.jar
 build/sbt-launch-lib.bash
+
+# Gluten JAR files (download via scripts/download-gluten-nightly.sh)
+lib/

@@ -21,6 +21,7 @@ lazy val root = (project in file("."))
       "org.apache.spark" %% "spark-sql" % sparkVersion.value,
       "org.apache.spark" %% "spark-core" % sparkVersion.value,
       "org.apache.spark" %% "spark-catalyst" % sparkVersion.value,
+      "org.apache.spark" %% "spark-hive" % sparkVersion.value,  // Required by Gluten for Hive support
       
       // Spark test jars for Benchmark utilities
       "org.apache.spark" %% "spark-core" % sparkVersion.value % "test" classifier "tests",
@@ -31,18 +32,23 @@ lazy val root = (project in file("."))
       "org.scalatest" %% "scalatest" % "3.2.17" % "test"
     ),
     
-    // Gluten package - optional, add via local JAR or when published
-    // To use local Gluten build:
-    //   ./build/sbt -Dgluten.jar=/path/to/gluten-package.jar compile
-    libraryDependencies ++= {
-      val glutenJar = sys.props.get("gluten.jar")
-      if (glutenJar.isDefined) Seq.empty  // Will be added via unmanagedJars
-      else Seq.empty  // Skip Gluten for now - not published to Maven
-    },
+    // Gluten package - loaded from lib/ directory or via -Dgluten.jar
+    // Download nightly: ./scripts/download-gluten-nightly.sh
+    // Or specify: ./build/sbt -Dgluten.jar=/path/to/gluten-package.jar
     
-    // Support for local Gluten JAR
+    // Support for Gluten JAR (from -Dgluten.jar or lib/ directory)
     Compile / unmanagedJars ++= {
-      sys.props.get("gluten.jar").map(path => Attributed.blank(file(path))).toSeq
+      val explicitJar = sys.props.get("gluten.jar").map(path => Attributed.blank(file(path)))
+      val libJar = {
+        val libDir = baseDirectory.value / "lib"
+        if (libDir.exists()) {
+          // Prefer symlink, then any gluten JAR
+          val symlink = libDir / "gluten-velox-bundle.jar"
+          if (symlink.exists()) Some(Attributed.blank(symlink))
+          else (libDir ** "gluten-velox-bundle-*.jar").get.headOption.map(Attributed.blank)
+        } else None
+      }
+      explicitJar.orElse(libJar).toSeq
     },
     
     // Fork JVM to properly load native libraries

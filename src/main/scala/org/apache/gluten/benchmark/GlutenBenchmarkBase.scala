@@ -62,6 +62,28 @@ trait GlutenBenchmarkBase extends BenchmarkBase {
   // ============================================================
 
   override def runBenchmarkSuite(mainArgs: Array[String]): Unit = {
+    // Check Gluten availability first
+    if (!glutenAvailable) {
+      System.err.println(
+        """
+          |================================================================================
+          |ERROR: Gluten is not available on the classpath!
+          |================================================================================
+          |
+          |The Gluten JAR is required to run performance comparisons.
+          |
+          |To download the nightly build, run:
+          |  ./scripts/download-gluten-nightly.sh
+          |
+          |Or specify a custom JAR path:
+          |  ./build/sbt -Dgluten.jar=/path/to/gluten-velox-bundle.jar "runMain ..."
+          |
+          |After downloading, the JAR will be auto-detected from lib/ directory.
+          |================================================================================
+        """.stripMargin)
+      throw new RuntimeException("Gluten JAR not found. Run: ./scripts/download-gluten-nightly.sh")
+    }
+
     // Optional filter from command line
     val filter = mainArgs.headOption
 
@@ -97,16 +119,12 @@ trait GlutenBenchmarkBase extends BenchmarkBase {
         }
       }
 
-      // Phase 2: Run on Gluten + Velox (only if Gluten is available)
-      if (glutenAvailable) {
-        benchmark.addCase(GLUTEN_VELOX) {
-          withSparkSession(glutenEnabled = true) { spark =>
-            benchDef.setup.foreach(_(spark))
-            benchDef.workload(spark).noop()
-          }
+      // Phase 2: Run on Gluten + Velox
+      benchmark.addCase(GLUTEN_VELOX) {
+        withSparkSession(glutenEnabled = true) { spark =>
+          benchDef.setup.foreach(_(spark))
+          benchDef.workload(spark).noop()
         }
-      } else {
-        println("  [Note] Gluten not available on classpath - running Vanilla Spark only")
       }
 
       benchmark.run()
