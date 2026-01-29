@@ -23,62 +23,62 @@ import org.apache.gluten.benchmark.{BenchmarkDef, GlutenBenchmarkBase}
  * Benchmark for aggregate operations.
  *
  * To run:
- *   sbt "runMain org.apache.gluten.benchmark.aggregate.AggregateBenchmark"
+ *   ./build/sbt "runMain org.apache.gluten.benchmark.aggregate.AggregateBenchmark"
  *
  * To generate results file:
- *   SPARK_GENERATE_BENCHMARK_FILES=1 sbt "runMain org.apache.gluten.benchmark.aggregate.AggregateBenchmark"
+ *   SPARK_GENERATE_BENCHMARK_FILES=1 ./build/sbt "runMain org.apache.gluten.benchmark.aggregate.AggregateBenchmark"
  */
 object AggregateBenchmark extends GlutenBenchmarkBase {
 
-  override protected def defaultCardinality: Long = 10_000_000L
+  override def defaultCardinality: Long = 10000000L
 
   private val N = defaultCardinality
 
   override def benchmarks: Seq[BenchmarkDef] = Seq(
     // Simple aggregations (no grouping)
-    "SUM(id)" -> { _.range(N).selectExpr("sum(id)") },
+    BenchmarkDef("SUM(id)", N, spark => spark.range(N).selectExpr("sum(id)")),
 
-    "COUNT(*)" -> { _.range(N).selectExpr("count(*)") },
+    BenchmarkDef("COUNT(*)", N, spark => spark.range(N).selectExpr("count(*)")),
 
-    "AVG(id)" -> { _.range(N).selectExpr("avg(id)") },
+    BenchmarkDef("AVG(id)", N, spark => spark.range(N).selectExpr("avg(id)")),
 
-    "MIN/MAX" -> { _.range(N).selectExpr("min(id)", "max(id)") },
+    BenchmarkDef("MIN/MAX", N, spark => spark.range(N).selectExpr("min(id)", "max(id)")),
 
-    "STDDEV" -> { _.range(N).selectExpr("stddev(id)") },
+    BenchmarkDef("STDDEV", N, spark => spark.range(N).selectExpr("stddev(id)")),
 
     // Aggregations with GROUP BY
-    "SUM with GROUP BY (low cardinality)" -> { spark =>
+    BenchmarkDef("SUM with GROUP BY (low cardinality)", N, spark =>
       spark.range(N)
         .selectExpr("id", "id % 100 as key")
         .groupBy("key")
         .sum("id")
-    },
+    ),
 
-    "SUM with GROUP BY (medium cardinality)" -> { spark =>
+    BenchmarkDef("SUM with GROUP BY (medium cardinality)", N, spark =>
       spark.range(N)
         .selectExpr("id", "id % 10000 as key")
         .groupBy("key")
         .sum("id")
-    },
+    ),
 
-    "SUM with GROUP BY (high cardinality)" -> { spark =>
+    BenchmarkDef("SUM with GROUP BY (high cardinality)", N, spark =>
       spark.range(N)
         .selectExpr("id", "id % 1000000 as key")
         .groupBy("key")
         .sum("id")
-    },
+    ),
 
     // COUNT DISTINCT
-    "COUNT DISTINCT (low cardinality)" -> { spark =>
+    BenchmarkDef("COUNT DISTINCT (low cardinality)", N, spark =>
       spark.range(N).selectExpr("count(distinct id % 100)")
-    },
+    ),
 
-    "COUNT DISTINCT (high cardinality)" -> { spark =>
+    BenchmarkDef("COUNT DISTINCT (high cardinality)", N, spark =>
       spark.range(N).selectExpr("count(distinct id)")
-    },
+    ),
 
     // Multiple aggregations
-    "Multiple aggregations" -> { spark =>
+    BenchmarkDef("Multiple aggregations", N, spark =>
       spark.range(N)
         .selectExpr("id", "id % 100 as key")
         .groupBy("key")
@@ -89,6 +89,6 @@ object AggregateBenchmark extends GlutenBenchmarkBase {
           "id" -> "max",
           "id" -> "count"
         )
-    }
+    )
   )
 }

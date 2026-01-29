@@ -24,95 +24,95 @@ import org.apache.spark.sql.functions._
  * Benchmark for string functions.
  *
  * To run:
- *   sbt "runMain org.apache.gluten.benchmark.functions.StringFunctionsBenchmark"
+ *   ./build/sbt "runMain org.apache.gluten.benchmark.functions.StringFunctionsBenchmark"
  */
 object StringFunctionsBenchmark extends GlutenBenchmarkBase {
 
-  override protected def defaultCardinality: Long = 5_000_000L
+  override def defaultCardinality: Long = 5000000L
 
   private val N = defaultCardinality
 
   override def benchmarks: Seq[BenchmarkDef] = Seq(
     // Basic string functions
-    "length()" -> { spark =>
+    BenchmarkDef("length()", N, spark => {
       import spark.implicits._
       spark.range(N).select(length($"id".cast("string")))
-    },
+    }),
 
-    "substring()" -> { spark =>
+    BenchmarkDef("substring()", N, spark => {
       import spark.implicits._
       spark.range(N).select(substring($"id".cast("string"), 1, 3))
-    },
+    }),
 
-    "concat()" -> { spark =>
+    BenchmarkDef("concat()", N, spark => {
       import spark.implicits._
       spark.range(N).select(concat($"id".cast("string"), lit("-suffix")))
-    },
+    }),
 
-    "upper()" -> { spark =>
+    BenchmarkDef("upper()", N, spark => {
       import spark.implicits._
       spark.range(N).select(upper($"id".cast("string")))
-    },
+    }),
 
-    "lower()" -> { spark =>
+    BenchmarkDef("lower()", N, spark => {
       import spark.implicits._
       spark.range(N).select(lower(concat(lit("ABC"), $"id".cast("string"))))
-    },
+    }),
 
-    "trim()" -> { spark =>
+    BenchmarkDef("trim()", N, spark => {
       import spark.implicits._
       spark.range(N).select(trim(concat(lit("  "), $"id".cast("string"), lit("  "))))
-    },
+    }),
 
     // Pattern matching
-    "like()" -> { spark =>
+    BenchmarkDef("like()", N, spark => {
       import spark.implicits._
       spark.range(N)
         .select($"id".cast("string").as("s"))
         .filter($"s".like("%1%"))
-    },
+    }),
 
-    "regexp_replace()" -> { spark =>
+    BenchmarkDef("regexp_replace()", N, spark => {
       import spark.implicits._
       spark.range(N).select(regexp_replace($"id".cast("string"), "1", "X"))
-    },
+    }),
 
-    "regexp_extract()" -> { spark =>
+    BenchmarkDef("regexp_extract()", N, spark => {
       import spark.implicits._
       spark.range(N).select(regexp_extract($"id".cast("string"), "(\\d)", 1))
-    },
+    }),
 
     // String manipulation
-    "split()" -> { spark =>
+    BenchmarkDef("split()", N, spark => {
       import spark.implicits._
       spark.range(N)
         .select(concat($"id".cast("string"), lit(","), ($"id" + 1).cast("string")).as("s"))
         .select(split($"s", ","))
-    },
+    }),
 
-    "reverse()" -> { spark =>
+    BenchmarkDef("reverse()", N, spark => {
       import spark.implicits._
       spark.range(N).select(reverse($"id".cast("string")))
-    },
+    }),
 
-    "repeat()" -> { spark =>
+    BenchmarkDef("repeat()", N, spark => {
       import spark.implicits._
       spark.range(N).select(repeat($"id".cast("string"), 3))
-    },
+    }),
 
     // Comparison
-    "contains()" -> { spark =>
+    BenchmarkDef("contains()", N, spark => {
       import spark.implicits._
       spark.range(N)
         .select($"id".cast("string").as("s"))
         .filter($"s".contains("42"))
-    },
+    }),
 
-    "startsWith()" -> { spark =>
+    BenchmarkDef("startsWith()", N, spark => {
       import spark.implicits._
       spark.range(N)
         .select($"id".cast("string").as("s"))
         .filter($"s".startsWith("1"))
-    }
+    })
   )
 }

@@ -27,18 +27,23 @@ lazy val root = (project in file("."))
       "org.apache.spark" %% "spark-sql" % sparkVersion.value % "test" classifier "tests",
       "org.apache.spark" %% "spark-catalyst" % sparkVersion.value % "test" classifier "tests",
       
-      // Gluten package (includes native libs)
-      "org.apache.gluten" % s"gluten-package-${sparkVersion.value.take(3)}_2.12" % glutenVersion.value % "test",
-      
       // Testing
       "org.scalatest" %% "scalatest" % "3.2.17" % "test"
     ),
     
-    // Resolvers for Gluten SNAPSHOT
-    resolvers ++= Seq(
-      "Apache Snapshots" at "https://repository.apache.org/content/repositories/snapshots/",
-      "Gluten Snapshots" at "https://repository.apache.org/content/groups/snapshots/"
-    ),
+    // Gluten package - optional, add via local JAR or when published
+    // To use local Gluten build:
+    //   ./build/sbt -Dgluten.jar=/path/to/gluten-package.jar compile
+    libraryDependencies ++= {
+      val glutenJar = sys.props.get("gluten.jar")
+      if (glutenJar.isDefined) Seq.empty  // Will be added via unmanagedJars
+      else Seq.empty  // Skip Gluten for now - not published to Maven
+    },
+    
+    // Support for local Gluten JAR
+    Compile / unmanagedJars ++= {
+      sys.props.get("gluten.jar").map(path => Attributed.blank(file(path))).toSeq
+    },
     
     // Fork JVM to properly load native libraries
     fork := true,
@@ -66,18 +71,6 @@ lazy val root = (project in file("."))
     )
   )
 
-// Custom task to run all benchmarks
-lazy val runBenchmarks = taskKey[Unit]("Run all benchmarks")
-runBenchmarks := {
-  (Test / runMain).toTask(" org.apache.gluten.benchmark.RunAllBenchmarks").value
-}
-
-// Custom task to run specific benchmark
-lazy val runBenchmark = inputKey[Unit]("Run a specific benchmark")
-runBenchmark := {
-  import complete.DefaultParsers._
-  val args = spaceDelimited("<benchmark>").parsed
-  args.headOption.foreach { benchmarkName =>
-    (Test / runMain).toTask(s" org.apache.gluten.benchmark.$benchmarkName").value
-  }
-}
+// To run benchmarks:
+//   ./build/sbt "runMain org.apache.gluten.benchmark.RunAllBenchmarks"
+//   ./build/sbt "runMain org.apache.gluten.benchmark.aggregate.AggregateBenchmark"

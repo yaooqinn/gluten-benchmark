@@ -38,3 +38,7 @@ test-output/
 task_plan.md
 findings.md
 progress.md
+
+# sbt launcher (copy from spark/build/ on demand)
+build/sbt-launch-*.jar
+build/sbt-launch-lib.bash

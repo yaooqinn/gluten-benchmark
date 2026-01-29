@@ -17,7 +17,6 @@
 
 package org.apache.gluten.benchmark
 
-import org.apache.spark.benchmark.{Benchmark, BenchmarkBase}
 import org.apache.spark.sql.{DataFrame, SaveMode, SparkSession}
 import org.apache.spark.sql.internal.SQLConf
 
@@ -25,23 +24,12 @@ import org.apache.spark.sql.internal.SQLConf
  * Base trait for Gluten micro-benchmarks.
  *
  * Provides automatic comparison between Vanilla Spark and Gluten+Velox.
- * Define benchmarks using the simple DSL:
- *
- * {{{
- * object MyBenchmark extends GlutenBenchmarkBase {
- *   val N = 10_000_000L
- *
- *   override def benchmarks = Seq(
- *     "SUM(id)" -> { _.range(N).selectExpr("sum(id)") },
- *     "COUNT DISTINCT" -> { _.range(N).selectExpr("count(distinct id % 1000)") }
- *   )
- * }
- * }}}
+ * Define benchmarks by implementing the `benchmarks` method.
  */
 trait GlutenBenchmarkBase extends BenchmarkBase {
 
   /** Default cardinality for benchmarks */
-  protected def defaultCardinality: Long = 10_000_000L
+  def defaultCardinality: Long = 10000000L
 
   /** Number of warmup iterations */
   protected def numWarmupIters: Int = 2
@@ -53,21 +41,7 @@ trait GlutenBenchmarkBase extends BenchmarkBase {
   def benchmarks: Seq[BenchmarkDef]
 
   // ============================================================
-  // Implicit conversions for clean DSL syntax
-  // ============================================================
-
-  /** Convert (String, SparkSession => DataFrame) to BenchmarkDef */
-  implicit def tupleToBenchmarkDef(
-      t: (String, SparkSession => DataFrame)
-  ): BenchmarkDef =
-    BenchmarkDef(t._1, defaultCardinality, t._2)
-
-  /** Convert (String, String) to BenchmarkDef (SQL query) */
-  implicit def sqlTupleToBenchmarkDef(t: (String, String)): BenchmarkDef =
-    BenchmarkDef(t._1, defaultCardinality, spark => spark.sql(t._2))
-
-  // ============================================================
-  // Engine definitions
+  // Engine labels
   // ============================================================
 
   private val VANILLA_SPARK = "Vanilla Spark"
@@ -77,20 +51,18 @@ trait GlutenBenchmarkBase extends BenchmarkBase {
   // Main benchmark runner
   // ============================================================
 
-  final override def runBenchmarkSuite(mainArgs: Array[String]): Unit = {
+  override def runBenchmarkSuite(mainArgs: Array[String]): Unit = {
     // Optional filter from command line
     val filter = mainArgs.headOption
 
     val toRun = filter match {
       case Some(pattern) => benchmarks.filter(_.name.toLowerCase.contains(pattern.toLowerCase))
-      case None          => benchmarks
+      case None => benchmarks
     }
 
     if (toRun.isEmpty) {
-      // scalastyle:off println
       println(s"No benchmarks matched filter: ${filter.getOrElse("(none)")}")
       println(s"Available benchmarks: ${benchmarks.map(_.name).mkString(", ")}")
-      // scalastyle:on println
       return
     }
 
@@ -102,24 +74,25 @@ trait GlutenBenchmarkBase extends BenchmarkBase {
       val benchmark = new Benchmark(
         benchDef.name,
         benchDef.cardinality,
-        minNumIters = numWarmupIters,
+        numIters = numIters,
+        warmupIters = numWarmupIters,
         output = output
       )
 
-      // Phase 1: Run all iterations on Vanilla Spark
+      // Phase 1: Run on Vanilla Spark
       withSparkSession(glutenEnabled = false) { spark =>
         benchDef.setup.foreach(_(spark))
 
-        benchmark.addCase(VANILLA_SPARK, numIters) { _ =>
+        benchmark.addCase(VANILLA_SPARK) {
           benchDef.workload(spark).noop()
         }
       }
 
-      // Phase 2: Run all iterations on Gluten + Velox
+      // Phase 2: Run on Gluten + Velox
       withSparkSession(glutenEnabled = true) { spark =>
         benchDef.setup.foreach(_(spark))
 
-        benchmark.addCase(GLUTEN_VELOX, numIters) { _ =>
+        benchmark.addCase(GLUTEN_VELOX) {
           benchDef.workload(spark).noop()
         }
       }
