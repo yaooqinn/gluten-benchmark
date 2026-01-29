@@ -124,8 +124,16 @@ trait BenchmarkBase {
     val generateFiles = sys.env.getOrElse("SPARK_GENERATE_BENCHMARK_FILES", "0") == "1"
     if (generateFiles) {
       val className = this.getClass.getSimpleName.replace("$", "")
-      val dir = new File("benchmarks")
+      
+      // Support dated subdirectories: SPARK_BENCHMARK_DATE=2026-01-30
+      val dateSubdir = sys.env.get("SPARK_BENCHMARK_DATE")
+      val baseDir = new File("benchmarks")
+      val dir = dateSubdir match {
+        case Some(date) => new File(baseDir, date)
+        case None => baseDir
+      }
       dir.mkdirs()
+      
       // Include Spark version in filename: AggregateBenchmark-spark3.5.5-results.txt
       val file = new File(dir, s"$className-spark$sparkVersion-results.txt")
       Some(new FileOutputStream(file))

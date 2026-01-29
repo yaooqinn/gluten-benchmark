@@ -60,30 +60,21 @@ jobs:
       - name: Run benchmarks
         env:
           SPARK_GENERATE_BENCHMARK_FILES: '1'
+          SPARK_BENCHMARK_DATE: ${{ steps.gluten.outputs.date }}
         run: |
-          sbt -Dspark.version=${{ matrix.spark }} \
+          ./build/sbt -Dspark.version=${{ matrix.spark }} \
               "runMain org.apache.gluten.benchmark.RunAllBenchmarks"
 
-      - name: Organize results
+      - name: List results
         run: |
-          mkdir -p results/${{ steps.gluten.outputs.date }}/spark-${{ matrix.spark }}
-          cp benchmarks/*.txt results/${{ steps.gluten.outputs.date }}/spark-${{ matrix.spark }}/
-          
-          # Create metadata file
-          cat > results/${{ steps.gluten.outputs.date }}/spark-${{ matrix.spark }}/metadata.json << EOF
-          {
-            "timestamp": "$(date -Iseconds)",
-            "glutenCommit": "${{ steps.gluten.outputs.sha }}",
-            "sparkVersion": "${{ matrix.spark }}",
-            "runner": "${{ runner.os }}-${{ runner.arch }}"
-          }
-          EOF
+          echo "Results saved to:"
+          find benchmarks -name "*.txt" -type f
 
       - name: Upload results
         uses: actions/upload-artifact@v4
         with:
-          name: benchmark-results-spark-${{ matrix.spark }}
-          path: results/
+          name: benchmark-results-spark-${{ matrix.spark }}-${{ steps.gluten.outputs.date }}
+          path: benchmarks/
 
   compare:
     needs: benchmark
@@ -95,22 +86,17 @@ jobs:
       - name: Download all results
         uses: actions/download-artifact@v4
         with:
-          path: new-results/
+          path: downloaded-results/
           pattern: benchmark-results-*
+          merge-multiple: true
 
-      - name: Compare with baseline
+      - name: Merge and compare results
         run: |
-          # Simple comparison script
-          echo "=== Benchmark Comparison ==="
-          for result_dir in new-results/*/results/*/spark-*; do
-            echo "--- $result_dir ---"
-            if [ -d "$result_dir" ]; then
-              for file in "$result_dir"/*.txt; do
-                echo "File: $file"
-                head -20 "$file" || true
-              done
-            fi
-          done
+          # Merge downloaded results into benchmarks/
+          cp -r downloaded-results/* benchmarks/ 2>/dev/null || true
+          
+          echo "=== Benchmark Results ==="
+          ./scripts/compare-daily.sh 7 || true
 
       - name: Commit results (if on main)
         if: github.ref == 'refs/heads/main'
@@ -118,10 +104,6 @@ jobs:
           git config user.name "GitHub Actions"
           git config user.email "actions@github.com"
           
-          # Merge results into benchmarks/
-          mkdir -p benchmarks/
-          cp -r new-results/*/results/* benchmarks/ 2>/dev/null || true
-          
           git add benchmarks/
-          git diff --staged --quiet || git commit -m "Benchmark results $(date +%Y-%m-%d)"
+          git diff --staged --quiet || git commit -m "Daily benchmark results $(date +%Y-%m-%d)"
           git push || echo "Push failed - may need manual intervention"
