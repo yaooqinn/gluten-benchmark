@@ -154,14 +154,14 @@ trait GlutenBenchmarkBase extends BenchmarkBase {
       .config(SQLConf.SHUFFLE_PARTITIONS.key, "4")
       .config(SQLConf.AUTO_BROADCASTJOIN_THRESHOLD.key, "-1")
       .config("spark.ui.enabled", "false")
-      .config("spark.driver.memory", "4g")
+      .config("spark.driver.memory", "8g")
 
     if (glutenEnabled) {
       builder
         .config("spark.plugins", "org.apache.gluten.GlutenPlugin")
         .config("spark.gluten.enabled", "true")
         .config("spark.memory.offHeap.enabled", "true")
-        .config("spark.memory.offHeap.size", "4g")
+        .config("spark.memory.offHeap.size", "6g")
     }
 
     builder.getOrCreate()

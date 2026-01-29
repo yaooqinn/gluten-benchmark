@@ -101,14 +101,33 @@ case class BenchmarkResult(
  * Base trait for benchmark applications.
  */
 trait BenchmarkBase {
-  
+
+  /** Get Spark version for result file naming */
+  protected lazy val sparkVersion: String = {
+    sys.props.getOrElse("spark.benchmark.version",
+      try {
+        Class.forName("org.apache.spark.SPARK_VERSION")
+          .getField("SPARK_VERSION").get(null).toString
+      } catch {
+        case _: Exception =>
+          org.apache.spark.package$.MODULE$.SPARK_VERSION
+      })
+  }
+
+  /** Whether Gluten is enabled for this run */
+  protected def glutenEnabled: Boolean = true
+
+  /** Engine suffix for result files */
+  protected def engineSuffix: String = if (glutenEnabled) "gluten" else "vanilla"
+
   protected lazy val output: Option[OutputStream] = {
     val generateFiles = sys.env.getOrElse("SPARK_GENERATE_BENCHMARK_FILES", "0") == "1"
     if (generateFiles) {
       val className = this.getClass.getSimpleName.replace("$", "")
       val dir = new File("benchmarks")
       dir.mkdirs()
-      val file = new File(dir, s"$className-results.txt")
+      // Include Spark version in filename: AggregateBenchmark-spark3.5.5-results.txt
+      val file = new File(dir, s"$className-spark$sparkVersion-results.txt")
       Some(new FileOutputStream(file))
     } else {
       None
