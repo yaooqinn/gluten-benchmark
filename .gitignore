@@ -1,0 +1,40 @@
+# Scala/SBT
+target/
+project/target/
+project/project/
+
+# IDE
+.idea/
+.bsp/
+.metals/
+.bloop/
+.vscode/
+
+# OS
+.DS_Store
+*.swp
+*~
+
+# Logs
+*.log
+derby.log
+
+# Spark
+metastore_db/
+spark-warehouse/
+
+# Test outputs (except benchmark results)
+test-output/
+
+# Native libraries (downloaded at runtime)
+*.so
+*.dylib
+*.dll
+
+# But keep benchmark results!
+!benchmarks/
+
+# Local planning files
+task_plan.md
+findings.md
+progress.md

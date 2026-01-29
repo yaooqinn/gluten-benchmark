@@ -1,0 +1,127 @@
+name: Nightly Benchmark
+
+on:
+  schedule:
+    # Run at 2 AM UTC daily
+    - cron: '0 2 * * *'
+  workflow_dispatch:
+    inputs:
+      gluten_commit:
+        description: 'Gluten commit SHA (optional, defaults to latest main)'
+        required: false
+      spark_version:
+        description: 'Spark version'
+        required: false
+        default: '3.5.5'
+
+env:
+  JAVA_VERSION: '8'
+  SBT_VERSION: '1.9.8'
+
+jobs:
+  benchmark:
+    runs-on: ubuntu-22.04
+    strategy:
+      matrix:
+        spark: ['3.4.4', '3.5.5']
+        # Add '4.0.0' when available
+      fail-fast: false
+
+    steps:
+      - name: Checkout benchmark repo
+        uses: actions/checkout@v4
+
+      - name: Set up JDK
+        uses: actions/setup-java@v4
+        with:
+          java-version: ${{ env.JAVA_VERSION }}
+          distribution: 'temurin'
+
+      - name: Cache sbt
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.sbt
+            ~/.ivy2/cache
+            ~/.cache/coursier
+          key: sbt-${{ hashFiles('build.sbt', 'project/build.properties') }}
+
+      - name: Get Gluten commit info
+        id: gluten
+        run: |
+          if [ -n "${{ inputs.gluten_commit }}" ]; then
+            echo "sha=${{ inputs.gluten_commit }}" >> $GITHUB_OUTPUT
+          else
+            SHA=$(curl -sL https://api.github.com/repos/apache/incubator-gluten/commits/main | jq -r '.sha')
+            echo "sha=$SHA" >> $GITHUB_OUTPUT
+          fi
+          echo "date=$(date +%Y-%m-%d)" >> $GITHUB_OUTPUT
+
+      - name: Run benchmarks
+        env:
+          SPARK_GENERATE_BENCHMARK_FILES: '1'
+        run: |
+          sbt -Dspark.version=${{ matrix.spark }} \
+              "runMain org.apache.gluten.benchmark.RunAllBenchmarks"
+
+      - name: Organize results
+        run: |
+          mkdir -p results/${{ steps.gluten.outputs.date }}/spark-${{ matrix.spark }}
+          cp benchmarks/*.txt results/${{ steps.gluten.outputs.date }}/spark-${{ matrix.spark }}/
+          
+          # Create metadata file
+          cat > results/${{ steps.gluten.outputs.date }}/spark-${{ matrix.spark }}/metadata.json << EOF
+          {
+            "timestamp": "$(date -Iseconds)",
+            "glutenCommit": "${{ steps.gluten.outputs.sha }}",
+            "sparkVersion": "${{ matrix.spark }}",
+            "runner": "${{ runner.os }}-${{ runner.arch }}"
+          }
+          EOF
+
+      - name: Upload results
+        uses: actions/upload-artifact@v4
+        with:
+          name: benchmark-results-spark-${{ matrix.spark }}
+          path: results/
+
+  compare:
+    needs: benchmark
+    runs-on: ubuntu-22.04
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Download all results
+        uses: actions/download-artifact@v4
+        with:
+          path: new-results/
+          pattern: benchmark-results-*
+
+      - name: Compare with baseline
+        run: |
+          # Simple comparison script
+          echo "=== Benchmark Comparison ==="
+          for result_dir in new-results/*/results/*/spark-*; do
+            echo "--- $result_dir ---"
+            if [ -d "$result_dir" ]; then
+              for file in "$result_dir"/*.txt; do
+                echo "File: $file"
+                head -20 "$file" || true
+              done
+            fi
+          done
+
+      - name: Commit results (if on main)
+        if: github.ref == 'refs/heads/main'
+        run: |
+          git config user.name "GitHub Actions"
+          git config user.email "actions@github.com"
+          
+          # Merge results into benchmarks/
+          mkdir -p benchmarks/
+          cp -r new-results/*/results/* benchmarks/ 2>/dev/null || true
+          
+          git add benchmarks/
+          git diff --staged --quiet || git commit -m "Benchmark results $(date +%Y-%m-%d)"
+          git push || echo "Push failed - may need manual intervention"
