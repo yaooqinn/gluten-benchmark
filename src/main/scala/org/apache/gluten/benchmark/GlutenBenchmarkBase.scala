@@ -40,6 +40,16 @@ trait GlutenBenchmarkBase extends BenchmarkBase {
   /** Define your benchmarks here */
   def benchmarks: Seq[BenchmarkDef]
 
+  /** Check if Gluten is available on classpath */
+  protected lazy val glutenAvailable: Boolean = {
+    try {
+      Class.forName("org.apache.gluten.GlutenPlugin")
+      true
+    } catch {
+      case _: ClassNotFoundException => false
+    }
+  }
+
   // ============================================================
   // Engine labels
   // ============================================================
@@ -80,21 +90,23 @@ trait GlutenBenchmarkBase extends BenchmarkBase {
       )
 
       // Phase 1: Run on Vanilla Spark
-      withSparkSession(glutenEnabled = false) { spark =>
-        benchDef.setup.foreach(_(spark))
-
-        benchmark.addCase(VANILLA_SPARK) {
+      benchmark.addCase(VANILLA_SPARK) {
+        withSparkSession(glutenEnabled = false) { spark =>
+          benchDef.setup.foreach(_(spark))
           benchDef.workload(spark).noop()
         }
       }
 
-      // Phase 2: Run on Gluten + Velox
-      withSparkSession(glutenEnabled = true) { spark =>
-        benchDef.setup.foreach(_(spark))
-
+      // Phase 2: Run on Gluten + Velox (only if Gluten is available)
+      if (glutenAvailable) {
         benchmark.addCase(GLUTEN_VELOX) {
-          benchDef.workload(spark).noop()
+          withSparkSession(glutenEnabled = true) { spark =>
+            benchDef.setup.foreach(_(spark))
+            benchDef.workload(spark).noop()
+          }
         }
+      } else {
+        println("  [Note] Gluten not available on classpath - running Vanilla Spark only")
       }
 
       benchmark.run()

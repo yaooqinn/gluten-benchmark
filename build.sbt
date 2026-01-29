@@ -18,9 +18,9 @@ lazy val root = (project in file("."))
     
     // Spark dependencies
     libraryDependencies ++= Seq(
-      "org.apache.spark" %% "spark-sql" % sparkVersion.value % "provided",
-      "org.apache.spark" %% "spark-core" % sparkVersion.value % "provided",
-      "org.apache.spark" %% "spark-catalyst" % sparkVersion.value % "provided",
+      "org.apache.spark" %% "spark-sql" % sparkVersion.value,
+      "org.apache.spark" %% "spark-core" % sparkVersion.value,
+      "org.apache.spark" %% "spark-catalyst" % sparkVersion.value,
       
       // Spark test jars for Benchmark utilities
       "org.apache.spark" %% "spark-core" % sparkVersion.value % "test" classifier "tests",
@@ -53,7 +53,22 @@ lazy val root = (project in file("."))
       "-Xmx8g",
       "-XX:+UseG1GC",
       "-XX:+UnlockDiagnosticVMOptions",
-      "-XX:+DebugNonSafepoints"  // Better profiling support
+      "-XX:+DebugNonSafepoints",  // Better profiling support
+      // Java 17 module access for Spark
+      "--add-opens=java.base/java.lang=ALL-UNNAMED",
+      "--add-opens=java.base/java.lang.invoke=ALL-UNNAMED",
+      "--add-opens=java.base/java.lang.reflect=ALL-UNNAMED",
+      "--add-opens=java.base/java.io=ALL-UNNAMED",
+      "--add-opens=java.base/java.net=ALL-UNNAMED",
+      "--add-opens=java.base/java.nio=ALL-UNNAMED",
+      "--add-opens=java.base/java.util=ALL-UNNAMED",
+      "--add-opens=java.base/java.util.concurrent=ALL-UNNAMED",
+      "--add-opens=java.base/java.util.concurrent.atomic=ALL-UNNAMED",
+      "--add-opens=java.base/sun.nio.ch=ALL-UNNAMED",
+      "--add-opens=java.base/sun.nio.cs=ALL-UNNAMED",
+      "--add-opens=java.base/sun.security.action=ALL-UNNAMED",
+      "--add-opens=java.base/sun.util.calendar=ALL-UNNAMED",
+      "--add-opens=java.security.jgss/sun.security.krb5=ALL-UNNAMED"
     ),
     
     // Enable benchmark result generation
