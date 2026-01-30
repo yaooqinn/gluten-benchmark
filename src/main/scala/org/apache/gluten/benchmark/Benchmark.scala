@@ -37,13 +37,20 @@ class Benchmark(
     output: Option[OutputStream] = None) {
 
   private val cases = scala.collection.mutable.ArrayBuffer[(String, () => Unit)]()
+  private val phasedCases = scala.collection.mutable.ArrayBuffer[(String, () => PhasedTiming)]()
   private val results = scala.collection.mutable.ArrayBuffer[BenchmarkResult]()
+  private val phasedResults = scala.collection.mutable.ArrayBuffer[PhasedBenchmarkResult]()
 
   private val out: PrintStream = output.map(new PrintStream(_)).getOrElse(System.out)
 
   /** Add a benchmark case */
   def addCase(caseName: String)(f: => Unit): Unit = {
     cases += ((caseName, () => f))
+  }
+
+  /** Add a benchmark case with phased timing (startup vs query) */
+  def addPhasedCase(caseName: String)(f: => PhasedTiming): Unit = {
+    phasedCases += ((caseName, () => f))
   }
 
   /** Run all benchmark cases */
@@ -87,7 +94,50 @@ class Benchmark(
     out.println()
   }
 
+  /** Run all phased benchmark cases (with separate startup/query timing) */
+  def runPhased(): Unit = {
+    out.println()
+    out.println(s"$name:")
+    out.println("-" * 100)
+    out.printf("%-30s %14s %14s %14s %14s %10s\n",
+      "", "Startup(ms)", "Query Best(ms)", "Query Avg(ms)", "Query Stdev(ms)", "Relative")
+    out.println("-" * 100)
+
+    var baselineQueryAvg: Option[Double] = None
+
+    phasedCases.foreach { case (caseName, workload) =>
+      // Warmup iterations
+      (1 to warmupIters).foreach { _ =>
+        workload()
+      }
+
+      // Measurement iterations
+      val timings = (1 to numIters).map { _ =>
+        workload()
+      }
+
+      val startupTimes = timings.map(_.startupMs)
+      val queryTimes = timings.map(_.queryMs)
+
+      val startupAvg = startupTimes.sum / startupTimes.length
+      val queryBest = queryTimes.min
+      val queryAvg = queryTimes.sum / queryTimes.length
+      val queryStddev = math.sqrt(queryTimes.map(t => math.pow(t - queryAvg, 2)).sum / queryTimes.length)
+
+      if (baselineQueryAvg.isEmpty) baselineQueryAvg = Some(queryAvg)
+      val relative = baselineQueryAvg.get / queryAvg
+
+      phasedResults += PhasedBenchmarkResult(caseName, startupAvg, queryBest, queryAvg, queryStddev, relative)
+
+      out.println(f"$caseName%-30s $startupAvg%14.0f $queryBest%14.0f $queryAvg%14.0f $queryStddev%14.1f $relative%10.1fX")
+    }
+
+    out.println("-" * 100)
+    out.println()
+  }
+
   def getResults: Seq[BenchmarkResult] = results.toSeq
+  def getPhasedResults: Seq[PhasedBenchmarkResult] = phasedResults.toSeq
 }
 
 case class BenchmarkResult(
@@ -95,6 +145,20 @@ case class BenchmarkResult(
     bestTimeMs: Double,
     avgTimeMs: Double,
     stddevMs: Double,
+    relative: Double)
+
+/** Timing result for a single phased run */
+case class PhasedTiming(
+    startupMs: Double,
+    queryMs: Double)
+
+/** Benchmark result with separate startup and query times */
+case class PhasedBenchmarkResult(
+    name: String,
+    startupAvgMs: Double,
+    queryBestMs: Double,
+    queryAvgMs: Double,
+    queryStddevMs: Double,
     relative: Double)
 
 /**
