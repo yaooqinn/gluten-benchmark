@@ -60,7 +60,7 @@ lazy val root = (project in file("."))
       "-XX:+UseG1GC",
       "-XX:+UnlockDiagnosticVMOptions",
       "-XX:+DebugNonSafepoints",  // Better profiling support
-      // Java 17 module access for Spark
+      // Java 17 module access for Spark and Gluten
       "--add-opens=java.base/java.lang=ALL-UNNAMED",
       "--add-opens=java.base/java.lang.invoke=ALL-UNNAMED",
       "--add-opens=java.base/java.lang.reflect=ALL-UNNAMED",
@@ -74,7 +74,10 @@ lazy val root = (project in file("."))
       "--add-opens=java.base/sun.nio.cs=ALL-UNNAMED",
       "--add-opens=java.base/sun.security.action=ALL-UNNAMED",
       "--add-opens=java.base/sun.util.calendar=ALL-UNNAMED",
-      "--add-opens=java.security.jgss/sun.security.krb5=ALL-UNNAMED"
+      "--add-opens=java.security.jgss/sun.security.krb5=ALL-UNNAMED",
+      // Additional opens required for Gluten ColumnarShuffleManager
+      "--add-opens=java.base/sun.misc=ALL-UNNAMED",
+      "-Dio.netty.tryReflectionSetAccessible=true"
     ),
     
     // Enable benchmark result generation

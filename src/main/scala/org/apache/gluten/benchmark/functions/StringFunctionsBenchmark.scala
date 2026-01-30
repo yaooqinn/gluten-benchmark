@@ -28,8 +28,8 @@ import org.apache.spark.sql.functions._
  */
 object StringFunctionsBenchmark extends GlutenBenchmarkBase {
 
-  // Increased to 50M rows to amortize JNI overhead and show Gluten's columnar processing advantage
-  // Target: each benchmark should run for at least 3000ms
+  // Use 50M rows - balance between amortizing overhead and reasonable runtime
+  // Target: each benchmark should run for 5-15 seconds
   override def defaultCardinality: Long = 50000000L
 
   private val N = defaultCardinality

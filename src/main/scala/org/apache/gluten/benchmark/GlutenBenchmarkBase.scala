@@ -31,8 +31,8 @@ trait GlutenBenchmarkBase extends BenchmarkBase {
   /** Default cardinality for benchmarks */
   def defaultCardinality: Long = 10000000L
 
-  /** Number of warmup iterations */
-  protected def numWarmupIters: Int = 2
+  /** Number of warmup iterations - increased to amortize Velox JIT compilation */
+  protected def numWarmupIters: Int = 5
 
   /** Number of measurement iterations */
   protected def numIters: Int = 5
@@ -152,8 +152,23 @@ trait GlutenBenchmarkBase extends BenchmarkBase {
     // Run setup (not timed)
     benchDef.setup.foreach(_(spark))
     
-    // Warmup iterations
-    (1 to numWarmupIters).foreach { _ =>
+    // Profile the first run in detail
+    val df = benchDef.workload(spark)
+    
+    // Measure query planning time
+    val planStart = System.nanoTime()
+    val plan = df.queryExecution.executedPlan
+    val planEnd = System.nanoTime()
+    val planTimeMs = (planEnd - planStart) / 1e6
+    
+    // Execute once to get timing breakdown
+    val execStart = System.nanoTime()
+    df.noop()
+    val execEnd = System.nanoTime()
+    val firstExecMs = (execEnd - execStart) / 1e6
+    
+    // Remaining warmup iterations
+    (2 to numWarmupIters).foreach { _ =>
       benchDef.workload(spark).noop()
     }
     
@@ -169,7 +184,8 @@ trait GlutenBenchmarkBase extends BenchmarkBase {
     val avg = times.sum / times.length
     val stddev = math.sqrt(times.map(t => math.pow(t - avg, 2)).sum / times.length)
     
-    println(f"  ${benchDef.name}%-45s $best%10.0f ms (best)  $avg%10.0f ms (avg)")
+    // Print profiling info
+    println(f"  ${benchDef.name}%-45s $best%10.0f ms (best)  $avg%10.0f ms (avg)  [plan: $planTimeMs%.0fms, first: $firstExecMs%.0fms]")
     
     BenchmarkResult(benchDef.name, best, avg, stddev, 1.0)
   }
@@ -209,7 +225,7 @@ trait GlutenBenchmarkBase extends BenchmarkBase {
       .builder()
       .master("local[*]")
       .appName(s"${this.getClass.getSimpleName} - ${if (glutenEnabled) "Gluten" else "Vanilla"}")
-      .config(SQLConf.SHUFFLE_PARTITIONS.key, "4")
+      .config(SQLConf.SHUFFLE_PARTITIONS.key, "8")
       .config(SQLConf.AUTO_BROADCASTJOIN_THRESHOLD.key, "-1")
       .config("spark.ui.enabled", "false")
       .config("spark.driver.memory", "8g")
@@ -218,6 +234,7 @@ trait GlutenBenchmarkBase extends BenchmarkBase {
       builder
         .config("spark.plugins", "org.apache.gluten.GlutenPlugin")
         .config("spark.gluten.enabled", "true")
+        .config("spark.shuffle.manager", "org.apache.spark.shuffle.sort.ColumnarShuffleManager")
         .config("spark.memory.offHeap.enabled", "true")
         .config("spark.memory.offHeap.size", "6g")
     }
