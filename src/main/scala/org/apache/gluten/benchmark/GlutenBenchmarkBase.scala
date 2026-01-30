@@ -98,50 +98,106 @@ trait GlutenBenchmarkBase extends BenchmarkBase {
       return
     }
 
-    toRun.foreach(runSingleBenchmark)
+    // Run all benchmarks with shared sessions
+    runAllBenchmarksWithSharedSessions(toRun)
   }
 
-  private def runSingleBenchmark(benchDef: BenchmarkDef): Unit = {
-    runBenchmark(benchDef.name) {
-      val benchmark = new Benchmark(
-        benchDef.name,
-        benchDef.cardinality,
-        numIters = numIters,
-        warmupIters = numWarmupIters,
-        output = output
-      )
-
-      // Run on Vanilla Spark (session created once, only query is timed)
-      benchmark.addManagedCase(VANILLA_SPARK) {
-        () => createSessionWithSetup(glutenEnabled = false, benchDef)
-      } { spark =>
-        spark.stop()
-        SparkSession.clearActiveSession()
-        SparkSession.clearDefaultSession()
-      } { spark =>
-        benchDef.workload(spark).noop()
+  /**
+   * Run all benchmarks with shared SparkSessions.
+   * Creates one Vanilla session for all Vanilla runs, one Gluten session for all Gluten runs.
+   */
+  private def runAllBenchmarksWithSharedSessions(benchDefs: Seq[BenchmarkDef]): Unit = {
+    // Phase 1: Run all benchmarks on Vanilla Spark
+    println(s"\n${"=" * 80}")
+    println("Running benchmarks with Vanilla Spark")
+    println("=" * 80)
+    
+    val vanillaSpark = createSparkSession(glutenEnabled = false)
+    val vanillaResults = try {
+      benchDefs.map { benchDef =>
+        runBenchmarkWithSession(benchDef, vanillaSpark, VANILLA_SPARK)
       }
-
-      // Run on Gluten + Velox (session created once, only query is timed)
-      benchmark.addManagedCase(GLUTEN_VELOX) {
-        () => createSessionWithSetup(glutenEnabled = true, benchDef)
-      } { spark =>
-        spark.stop()
-        SparkSession.clearActiveSession()
-        SparkSession.clearDefaultSession()
-      } { spark =>
-        benchDef.workload(spark).noop()
-      }
-
-      benchmark.runManaged()
+    } finally {
+      vanillaSpark.stop()
+      SparkSession.clearActiveSession()
+      SparkSession.clearDefaultSession()
     }
+
+    // Phase 2: Run all benchmarks on Gluten + Velox
+    println(s"\n${"=" * 80}")
+    println("Running benchmarks with Gluten + Velox")
+    println("=" * 80)
+    
+    val glutenSpark = createSparkSession(glutenEnabled = true)
+    val glutenResults = try {
+      benchDefs.map { benchDef =>
+        runBenchmarkWithSession(benchDef, glutenSpark, GLUTEN_VELOX)
+      }
+    } finally {
+      glutenSpark.stop()
+      SparkSession.clearActiveSession()
+      SparkSession.clearDefaultSession()
+    }
+
+    // Phase 3: Print combined results
+    printCombinedResults(benchDefs, vanillaResults, glutenResults)
   }
 
-  /** Create session and run setup (tables, etc.) - this is NOT timed */
-  private def createSessionWithSetup(glutenEnabled: Boolean, benchDef: BenchmarkDef): SparkSession = {
-    val spark = createSparkSession(glutenEnabled)
+  /** Run a single benchmark with an existing session */
+  private def runBenchmarkWithSession(
+      benchDef: BenchmarkDef,
+      spark: SparkSession,
+      engineName: String): BenchmarkResult = {
+    
+    // Run setup (not timed)
     benchDef.setup.foreach(_(spark))
-    spark
+    
+    // Warmup iterations
+    (1 to numWarmupIters).foreach { _ =>
+      benchDef.workload(spark).noop()
+    }
+    
+    // Measurement iterations
+    val times = (1 to numIters).map { _ =>
+      val start = System.nanoTime()
+      benchDef.workload(spark).noop()
+      val end = System.nanoTime()
+      (end - start) / 1e6
+    }
+    
+    val best = times.min
+    val avg = times.sum / times.length
+    val stddev = math.sqrt(times.map(t => math.pow(t - avg, 2)).sum / times.length)
+    
+    println(f"  ${benchDef.name}%-45s $best%10.0f ms (best)  $avg%10.0f ms (avg)")
+    
+    BenchmarkResult(benchDef.name, best, avg, stddev, 1.0)
+  }
+
+  /** Print combined results comparing Vanilla vs Gluten */
+  private def printCombinedResults(
+      benchDefs: Seq[BenchmarkDef],
+      vanillaResults: Seq[BenchmarkResult],
+      glutenResults: Seq[BenchmarkResult]): Unit = {
+    
+    val out = output.map(new java.io.PrintStream(_)).getOrElse(System.out)
+    
+    benchDefs.zip(vanillaResults.zip(glutenResults)).foreach {
+      case (benchDef, (vanilla, gluten)) =>
+        out.println()
+        out.println(s"${benchDef.name}:")
+        out.println("-" * 80)
+        out.printf("%-40s %12s %12s %12s %10s\n",
+          "", "Best Time(ms)", "Avg Time(ms)", "Stdev(ms)", "Relative")
+        out.println("-" * 80)
+        
+        val relative = vanilla.avgTimeMs / gluten.avgTimeMs
+        
+        out.println(f"$VANILLA_SPARK%-40s ${vanilla.bestTimeMs}%12.0f ${vanilla.avgTimeMs}%12.0f ${vanilla.stddevMs}%12.1f ${1.0}%10.1fX")
+        out.println(f"$GLUTEN_VELOX%-40s ${gluten.bestTimeMs}%12.0f ${gluten.avgTimeMs}%12.0f ${gluten.stddevMs}%12.1f $relative%10.1fX")
+        out.println("-" * 80)
+    }
+    out.println()
   }
 
   // ============================================================
