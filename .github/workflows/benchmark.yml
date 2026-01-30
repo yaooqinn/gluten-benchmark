@@ -57,6 +57,12 @@ jobs:
           fi
           echo "date=$(date +%Y-%m-%d)" >> $GITHUB_OUTPUT
 
+      - name: Download Gluten JAR
+        run: |
+          # Extract major.minor version (e.g., 3.5.5 -> 3.5)
+          SPARK_MAJOR_MINOR=$(echo "${{ matrix.spark }}" | sed 's/\([0-9]*\.[0-9]*\)\..*/\1/')
+          SPARK_VERSION=$SPARK_MAJOR_MINOR ./scripts/download-gluten-nightly.sh
+
       - name: Run benchmarks
         env:
           SPARK_GENERATE_BENCHMARK_FILES: '1'
