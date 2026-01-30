@@ -6,10 +6,10 @@ This directory contains benchmark results comparing Vanilla Spark vs Gluten+Velo
 
 ```
 benchmarks/
-├── AggregateBenchmark-spark3.5.5-results.txt     # Current results (no date)
+├── AggregateBenchmark-spark3.5-results.txt        # Current results (no date)
 ├── 2026-01-30/                                    # Daily results
-│   ├── AggregateBenchmark-spark3.5.5-results.txt
-│   ├── StringFunctionsBenchmark-spark3.5.5-results.txt
+│   ├── AggregateBenchmark-spark3.5-results.txt
+│   ├── StringFunctionsBenchmark-spark3.5-results.txt
 │   └── metadata.json
 ├── 2026-01-29/
 │   └── ...

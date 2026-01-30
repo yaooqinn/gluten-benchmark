@@ -102,24 +102,13 @@ case class BenchmarkResult(
  */
 trait BenchmarkBase {
 
-  /** Get Spark version for result file naming */
+  /** Get Spark major.minor version for result file naming (e.g., "3.5") */
   protected lazy val sparkVersion: String = {
-    sys.props.getOrElse("spark.benchmark.version",
-      try {
-        // Use reflection to get SPARK_VERSION from org.apache.spark.SPARK_VERSION object
-        val clazz = Class.forName("org.apache.spark.SPARK_VERSION$")
-        val module = clazz.getField("MODULE$").get(null)
-        clazz.getMethod("spark_version").invoke(module).toString
-      } catch {
-        case _: Exception =>
-          // Fallback: try SparkContext.SPARK_VERSION if available
-          try {
-            val clazz = Class.forName("org.apache.spark.SparkContext")
-            clazz.getField("SPARK_VERSION").get(null).toString
-          } catch {
-            case _: Exception => "unknown"
-          }
-      })
+    sys.props.getOrElse("spark.benchmark.version", {
+      val fullVersion = org.apache.spark.SPARK_VERSION
+      // Extract major.minor (e.g., "3.5.5" -> "3.5")
+      fullVersion.split("\\.").take(2).mkString(".")
+    })
   }
 
   /** Whether Gluten is enabled for this run */
@@ -142,7 +131,7 @@ trait BenchmarkBase {
       }
       dir.mkdirs()
       
-      // Include Spark version in filename: AggregateBenchmark-spark3.5.5-results.txt
+      // Include Spark major.minor version in filename: AggregateBenchmark-spark3.5-results.txt
       val file = new File(dir, s"$className-spark$sparkVersion-results.txt")
       Some(new FileOutputStream(file))
     } else {
