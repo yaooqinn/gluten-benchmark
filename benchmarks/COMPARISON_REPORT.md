@@ -72,9 +72,16 @@ These benchmarks use `spark.range()` which generates row-based data requiring co
 
 ### Why Range Shows Overhead
 
-1. **Row-to-Columnar Conversion**: `spark.range()` generates row-based data
-2. **JNI Overhead**: Each conversion requires JVM↔Native boundary crossing
-3. **Small Data Size**: For operations completing in <500ms, fixed overhead dominates
+1. **Batch Format Conversion**: Gluten uses `ColumnarRangeExec` which generates Arrow Java batches
+2. **Multi-step Transition**: Arrow Java → Arrow Native → Velox batch format
+3. **JNI Overhead**: Each conversion requires JVM↔Native boundary crossing
+4. **Small Data Size**: For operations completing in <500ms, fixed overhead dominates
+
+**Technical Detail:** Velox *does* have native `ColumnarRangeExec` support, which is automatically enabled.
+However, it produces `ArrowJavaBatchType` which requires transition to `VeloxBatchType`:
+- `ColumnarRangeExec` → `OffloadArrowDataExec` → `ArrowColumnarToVeloxColumnarExec` → Velox operators
+
+This is lighter than full row→columnar conversion but still adds overhead.
 
 ### When Gluten Excels
 
