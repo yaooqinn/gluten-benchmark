@@ -15,8 +15,20 @@ echo "Gluten Benchmark Version Comparison"
 echo "========================================"
 echo ""
 
+# Find the most recent dated directory, or fall back to root benchmarks
+LATEST_DATE_DIR=$(find "$BENCHMARKS_DIR" -maxdepth 1 -type d -name "20*-*-*" 2>/dev/null | sort -r | head -1)
+
+if [[ -n "$LATEST_DATE_DIR" ]]; then
+    SEARCH_DIR="$LATEST_DATE_DIR"
+    echo "Using results from: $(basename "$LATEST_DATE_DIR")"
+else
+    SEARCH_DIR="$BENCHMARKS_DIR"
+    echo "Using results from: benchmarks/"
+fi
+echo ""
+
 # Find all result files
-mapfile -t RESULT_FILES < <(find "$BENCHMARKS_DIR" -name "*-spark*-results.txt" -type f 2>/dev/null | sort)
+mapfile -t RESULT_FILES < <(find "$SEARCH_DIR" -maxdepth 1 -name "*-spark*-results.txt" -type f 2>/dev/null | sort)
 
 if [[ ${#RESULT_FILES[@]} -eq 0 ]]; then
     echo "No result files found in $BENCHMARKS_DIR"
@@ -64,8 +76,8 @@ for file in "${RESULT_FILES[@]}"; do
     gluten_time=""
     
     while IFS= read -r line; do
-        # New benchmark section (line ending with colon, not all dashes)
-        if [[ "$line" =~ ^[A-Za-z0-9_\(\)].*:$ && ! "$line" =~ ^-+ ]]; then
+        # New benchmark section (starts with letter, ends with colon, not all dashes)
+        if [[ "$line" =~ ^[A-Za-z][A-Za-z0-9_\ \(\)\*/]*:$ && ! "$line" =~ ^-+ ]]; then
             # Save previous benchmark if we have data
             if [[ -n "$current_bench" && (-n "$vanilla_time" || -n "$gluten_time") ]]; then
                 key="${current_bench}::${ver}"

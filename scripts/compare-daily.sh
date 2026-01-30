@@ -55,8 +55,8 @@ parse_results() {
     local gluten_time=""
     
     while IFS= read -r line; do
-        # New benchmark section
-        if [[ "$line" =~ ^[A-Za-z0-9_\(\)].*:$ && ! "$line" =~ ^-+ ]]; then
+        # New benchmark section (starts with letter, ends with colon, not all dashes)
+        if [[ "$line" =~ ^[A-Za-z][A-Za-z0-9_\ \(\)\*/]*:$ && ! "$line" =~ ^-+ ]]; then
             # Output previous benchmark
             if [[ -n "$current_bench" && (-n "$vanilla_time" || -n "$gluten_time") ]]; then
                 echo "${current_bench}|||${vanilla_time:-?}|||${gluten_time:-?}"
@@ -122,7 +122,9 @@ echo " | Trend"
 echo "$(printf '=%.0s' $(seq 1 $((WIDTH + 15 * ${#SORTED_DATES[@]} + 10))))"
 
 # Print data rows with trend
-for bench in $(printf '%s\n' "${!BENCHNAMES[@]}" | sort); do
+while IFS= read -r bench; do
+    [[ -z "$bench" ]] && continue
+    
     # Apply filter
     if [[ -n "$FILTER" && ! "$bench" =~ $FILTER ]]; then
         continue
@@ -158,7 +160,7 @@ for bench in $(printf '%s\n' "${!BENCHNAMES[@]}" | sort); do
         printf " | -"
     fi
     echo ""
-done
+done < <(printf '%s\n' "${!BENCHNAMES[@]}" | sort)
 
 echo "$(printf '=%.0s' $(seq 1 $((WIDTH + 15 * ${#SORTED_DATES[@]} + 10))))"
 echo ""
