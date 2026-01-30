@@ -44,3 +44,4 @@ build/sbt-launch-*.jar
 
 # Gluten JAR files (download via scripts/download-gluten-nightly.sh)
 lib/
+project/metals.sbt

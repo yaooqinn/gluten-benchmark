@@ -106,11 +106,19 @@ trait BenchmarkBase {
   protected lazy val sparkVersion: String = {
     sys.props.getOrElse("spark.benchmark.version",
       try {
-        Class.forName("org.apache.spark.SPARK_VERSION")
-          .getField("SPARK_VERSION").get(null).toString
+        // Use reflection to get SPARK_VERSION from org.apache.spark.SPARK_VERSION object
+        val clazz = Class.forName("org.apache.spark.SPARK_VERSION$")
+        val module = clazz.getField("MODULE$").get(null)
+        clazz.getMethod("spark_version").invoke(module).toString
       } catch {
         case _: Exception =>
-          org.apache.spark.package$.MODULE$.SPARK_VERSION
+          // Fallback: try SparkContext.SPARK_VERSION if available
+          try {
+            val clazz = Class.forName("org.apache.spark.SparkContext")
+            clazz.getField("SPARK_VERSION").get(null).toString
+          } catch {
+            case _: Exception => "unknown"
+          }
       })
   }
 
