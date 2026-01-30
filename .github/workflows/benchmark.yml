@@ -18,6 +18,9 @@ env:
   JAVA_VERSION: '17'
   SBT_VERSION: '1.9.8'
 
+permissions:
+  contents: write
+
 jobs:
   benchmark:
     runs-on: ubuntu-22.04
