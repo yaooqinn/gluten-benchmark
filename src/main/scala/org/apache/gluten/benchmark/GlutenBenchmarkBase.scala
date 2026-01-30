@@ -111,63 +111,42 @@ trait GlutenBenchmarkBase extends BenchmarkBase {
         output = output
       )
 
-      // Phase 1: Run on Vanilla Spark (with phased timing)
-      benchmark.addPhasedCase(VANILLA_SPARK) {
-        withPhasedTiming(glutenEnabled = false) { spark =>
-          benchDef.setup.foreach(_(spark))
-          benchDef.workload(spark).noop()
-        }
+      // Run on Vanilla Spark (session created once, only query is timed)
+      benchmark.addManagedCase(VANILLA_SPARK) {
+        () => createSessionWithSetup(glutenEnabled = false, benchDef)
+      } { spark =>
+        spark.stop()
+        SparkSession.clearActiveSession()
+        SparkSession.clearDefaultSession()
+      } { spark =>
+        benchDef.workload(spark).noop()
       }
 
-      // Phase 2: Run on Gluten + Velox (with phased timing)
-      benchmark.addPhasedCase(GLUTEN_VELOX) {
-        withPhasedTiming(glutenEnabled = true) { spark =>
-          benchDef.setup.foreach(_(spark))
-          benchDef.workload(spark).noop()
-        }
+      // Run on Gluten + Velox (session created once, only query is timed)
+      benchmark.addManagedCase(GLUTEN_VELOX) {
+        () => createSessionWithSetup(glutenEnabled = true, benchDef)
+      } { spark =>
+        spark.stop()
+        SparkSession.clearActiveSession()
+        SparkSession.clearDefaultSession()
+      } { spark =>
+        benchDef.workload(spark).noop()
       }
 
-      benchmark.runPhased()
+      benchmark.runManaged()
     }
+  }
+
+  /** Create session and run setup (tables, etc.) - this is NOT timed */
+  private def createSessionWithSetup(glutenEnabled: Boolean, benchDef: BenchmarkDef): SparkSession = {
+    val spark = createSparkSession(glutenEnabled)
+    benchDef.setup.foreach(_(spark))
+    spark
   }
 
   // ============================================================
   // SparkSession management
   // ============================================================
-
-  /** Run workload with phased timing: separate startup time from query time */
-  private def withPhasedTiming(glutenEnabled: Boolean)(f: SparkSession => Unit): PhasedTiming = {
-    // Measure startup time
-    val startupStart = System.nanoTime()
-    val spark = createSparkSession(glutenEnabled)
-    val startupEnd = System.nanoTime()
-    val startupMs = (startupEnd - startupStart) / 1e6
-
-    try {
-      // Measure query time
-      val queryStart = System.nanoTime()
-      f(spark)
-      val queryEnd = System.nanoTime()
-      val queryMs = (queryEnd - queryStart) / 1e6
-
-      PhasedTiming(startupMs, queryMs)
-    } finally {
-      spark.stop()
-      SparkSession.clearActiveSession()
-      SparkSession.clearDefaultSession()
-    }
-  }
-
-  private def withSparkSession[T](glutenEnabled: Boolean)(f: SparkSession => T): T = {
-    val spark = createSparkSession(glutenEnabled)
-    try {
-      f(spark)
-    } finally {
-      spark.stop()
-      SparkSession.clearActiveSession()
-      SparkSession.clearDefaultSession()
-    }
-  }
 
   private def createSparkSession(glutenEnabled: Boolean): SparkSession = {
     val builder = SparkSession

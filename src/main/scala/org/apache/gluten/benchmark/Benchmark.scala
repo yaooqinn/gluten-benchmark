@@ -38,6 +38,7 @@ class Benchmark(
 
   private val cases = scala.collection.mutable.ArrayBuffer[(String, () => Unit)]()
   private val phasedCases = scala.collection.mutable.ArrayBuffer[(String, () => PhasedTiming)]()
+  private val managedCases = scala.collection.mutable.ArrayBuffer[ManagedCase[_]]()
   private val results = scala.collection.mutable.ArrayBuffer[BenchmarkResult]()
   private val phasedResults = scala.collection.mutable.ArrayBuffer[PhasedBenchmarkResult]()
 
@@ -88,6 +89,68 @@ class Benchmark(
       results += BenchmarkResult(caseName, best, avg, stddev, relative)
 
       out.println(f"$caseName%-40s $best%12.0f $avg%12.0f $stddev%12.1f $relative%10.1fX")
+    }
+
+    out.println("-" * 80)
+    out.println()
+  }
+
+  /**
+   * Add a benchmark case with managed session lifecycle.
+   * Session is created once before all iterations, query runs multiple times.
+   * @param caseName Name of the benchmark case
+   * @param createSession Function to create the session/context
+   * @param cleanup Function to cleanup the session/context
+   * @param query Function that takes the session and executes the query
+   */
+  def addManagedCase[S](caseName: String)(
+      createSession: () => S)(
+      cleanup: S => Unit)(
+      query: S => Unit): Unit = {
+    managedCases += ManagedCase(caseName, () => createSession(), cleanup, query)
+  }
+
+  /** Run all managed benchmark cases (session created once, query timed per iteration) */
+  def runManaged(): Unit = {
+    out.println()
+    out.println(s"$name:")
+    out.println("-" * 80)
+    out.printf("%-40s %12s %12s %12s %10s\n",
+      "", "Best Time(ms)", "Avg Time(ms)", "Stdev(ms)", "Relative")
+    out.println("-" * 80)
+
+    var baseline: Option[Double] = None
+
+    managedCases.foreach { case ManagedCase(caseName, createSession, cleanup, query) =>
+      // Create session once
+      val session = createSession()
+      try {
+        // Warmup iterations (using same session)
+        (1 to warmupIters).foreach { _ =>
+          query(session)
+        }
+
+        // Measurement iterations (using same session)
+        val times = (1 to numIters).map { _ =>
+          val start = System.nanoTime()
+          query(session)
+          val end = System.nanoTime()
+          (end - start) / 1e6
+        }
+
+        val best = times.min
+        val avg = times.sum / times.length
+        val stddev = math.sqrt(times.map(t => math.pow(t - avg, 2)).sum / times.length)
+
+        if (baseline.isEmpty) baseline = Some(avg)
+        val relative = baseline.get / avg
+
+        results += BenchmarkResult(caseName, best, avg, stddev, relative)
+
+        out.println(f"$caseName%-40s $best%12.0f $avg%12.0f $stddev%12.1f $relative%10.1fX")
+      } finally {
+        cleanup(session)
+      }
     }
 
     out.println("-" * 80)
@@ -160,6 +223,13 @@ case class PhasedBenchmarkResult(
     queryAvgMs: Double,
     queryStddevMs: Double,
     relative: Double)
+
+/** Helper class for managed benchmark cases */
+private[benchmark] case class ManagedCase[S](
+    name: String,
+    createSession: () => S,
+    cleanup: S => Unit,
+    query: S => Unit)
 
 /**
  * Base trait for benchmark applications.
