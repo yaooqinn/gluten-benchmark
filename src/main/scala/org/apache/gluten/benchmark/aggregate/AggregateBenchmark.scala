@@ -31,11 +31,12 @@ import java.io.File
  */
 object AggregateBenchmark extends GlutenBenchmarkBase {
 
-  // 100M rows - provides substantial I/O workload
-  override def defaultCardinality: Long = 100000000L
+  // 50M rows for basic tests
+  override def defaultCardinality: Long = 50000000L
 
   private val N = defaultCardinality
   private val dataPath = s"/tmp/gluten-benchmark-data-$N"
+  private val nestedDataPath = s"/tmp/gluten-benchmark-nested-$N"
   
   /** Generate test Parquet data if it doesn't exist */
   private def ensureDataExists(spark: SparkSession): Unit = {
@@ -51,7 +52,7 @@ object AggregateBenchmark extends GlutenBenchmarkBase {
           "id",
           "id % 100 as key_low",
           "id % 10000 as key_med",
-          "id % 1000000 as key_high",
+          "id % 500000 as key_high",
           "cast(rand() * 1000 as double) as value",
           "concat('str_', id % 1000) as str_col"
         )
@@ -61,6 +62,36 @@ object AggregateBenchmark extends GlutenBenchmarkBase {
       
       // scalastyle:off println
       println(s"  Test data generated.")
+      // scalastyle:on println
+    }
+  }
+
+  /** Generate nested type test data */
+  private def ensureNestedDataExists(spark: SparkSession): Unit = {
+    val dataDir = new File(nestedDataPath)
+    if (!dataDir.exists()) {
+      // scalastyle:off println
+      println(s"  Generating nested test data at $nestedDataPath ...")
+      // scalastyle:on println
+      
+      spark.range(N)
+        .selectExpr(
+          "id",
+          "id % 100 as key_low",
+          "id % 10000 as key_med",
+          // Array type
+          "array(id % 10, id % 20, id % 30) as arr_col",
+          // Struct type
+          "named_struct('a', id % 100, 'b', concat('s', id % 50)) as struct_col",
+          // Map type
+          "map('k1', id % 100, 'k2', id % 200) as map_col"
+        )
+        .write
+        .mode(SaveMode.Overwrite)
+        .parquet(nestedDataPath)
+      
+      // scalastyle:off println
+      println(s"  Nested test data generated.")
       // scalastyle:on println
     }
   }
@@ -118,7 +149,7 @@ object AggregateBenchmark extends GlutenBenchmarkBase {
     // Filter + Aggregate (pushdown test)
     BenchmarkDef("Filter + SUM", N, spark =>
       spark.read.parquet(dataPath)
-        .filter("id > 50000000")
+        .filter("id > 25000000")
         .selectExpr("sum(id)")
     ),
 
@@ -128,24 +159,11 @@ object AggregateBenchmark extends GlutenBenchmarkBase {
         .selectExpr("count(distinct str_col)")
     ),
 
-    // Collection aggregations (use high cardinality key to limit array sizes)
-    // Test with different types: int, double, string
+    // Collection aggregations - use high cardinality key to limit array sizes
     BenchmarkDef("collect_list(int)", N, spark =>
       spark.read.parquet(dataPath)
         .groupBy("key_high")
         .agg("key_low" -> "collect_list")
-    ),
-
-    BenchmarkDef("collect_list(double)", N, spark =>
-      spark.read.parquet(dataPath)
-        .groupBy("key_high")
-        .agg("value" -> "collect_list")
-    ),
-
-    BenchmarkDef("collect_list(string)", N, spark =>
-      spark.read.parquet(dataPath)
-        .groupBy("key_high")
-        .agg("str_col" -> "collect_list")
     ),
 
     BenchmarkDef("collect_set(int)", N, spark =>
@@ -154,16 +172,52 @@ object AggregateBenchmark extends GlutenBenchmarkBase {
         .agg("key_low" -> "collect_set")
     ),
 
-    BenchmarkDef("collect_set(double)", N, spark =>
-      spark.read.parquet(dataPath)
-        .groupBy("key_high")
-        .agg("value" -> "collect_set")
-    ),
-
     BenchmarkDef("collect_set(string)", N, spark =>
       spark.read.parquet(dataPath)
         .groupBy("key_high")
         .agg("str_col" -> "collect_set")
+    ),
+
+    // Nested type aggregations
+    BenchmarkDef("SUM array element", N, spark =>
+      spark.read.parquet(nestedDataPath)
+        .selectExpr("sum(arr_col[0])")
+    ).withSetup(ensureNestedDataExists),
+
+    BenchmarkDef("SUM struct field", N, spark =>
+      spark.read.parquet(nestedDataPath)
+        .selectExpr("sum(struct_col.a)")
+    ),
+
+    BenchmarkDef("SUM map value", N, spark =>
+      spark.read.parquet(nestedDataPath)
+        .selectExpr("sum(map_col['k1'])")
+    ),
+
+    BenchmarkDef("GROUP BY array element", N, spark =>
+      spark.read.parquet(nestedDataPath)
+        .selectExpr("arr_col[0] as arr_elem", "*")
+        .groupBy("arr_elem")
+        .count()
+    ),
+
+    BenchmarkDef("GROUP BY struct field", N, spark =>
+      spark.read.parquet(nestedDataPath)
+        .selectExpr("struct_col.a as struct_field", "*")
+        .groupBy("struct_field")
+        .count()
+    ),
+
+    BenchmarkDef("collect_list(array)", N, spark =>
+      spark.read.parquet(nestedDataPath)
+        .groupBy("key_med")
+        .agg("arr_col" -> "collect_list")
+    ),
+
+    BenchmarkDef("collect_list(struct)", N, spark =>
+      spark.read.parquet(nestedDataPath)
+        .groupBy("key_med")
+        .agg("struct_col" -> "collect_list")
     )
   )
 }
