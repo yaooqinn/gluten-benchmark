@@ -218,6 +218,46 @@ object AggregateBenchmark extends GlutenBenchmarkBase {
       spark.read.parquet(nestedDataPath)
         .groupBy("key_med")
         .agg("struct_col" -> "collect_list")
+    ),
+
+    // Struct construction and access benchmarks
+    BenchmarkDef("named_struct creation", N, spark =>
+      spark.read.parquet(dataPath)
+        .selectExpr("named_struct('x', id, 'y', value, 'z', str_col) as s")
+        .selectExpr("sum(s.x)")
+    ),
+
+    BenchmarkDef("struct creation", N, spark =>
+      spark.read.parquet(dataPath)
+        .selectExpr("struct(id, value, str_col) as s")
+        .selectExpr("sum(s.id)")
+    ),
+
+    BenchmarkDef("dot notation access", N, spark =>
+      spark.read.parquet(nestedDataPath)
+        .selectExpr("struct_col.a", "struct_col.b")
+        .selectExpr("sum(a)", "count(b)")
+    ),
+
+    BenchmarkDef("nested dot notation", N, spark =>
+      spark.read.parquet(nestedDataPath)
+        .selectExpr("named_struct('inner', struct_col) as outer")
+        .selectExpr("sum(outer.inner.a)")
+    ),
+
+    BenchmarkDef("struct in GROUP BY", N, spark =>
+      spark.read.parquet(nestedDataPath)
+        .groupBy("struct_col")
+        .count()
+    ),
+
+    BenchmarkDef("multi-field struct access", N, spark =>
+      spark.read.parquet(nestedDataPath)
+        .selectExpr(
+          "struct_col.a + struct_col.a as doubled",
+          "concat(struct_col.b, struct_col.b) as concat_b"
+        )
+        .selectExpr("sum(doubled)", "count(concat_b)")
     )
   )
 }
