@@ -115,8 +115,9 @@ object MapFunctionsBenchmark extends GlutenBenchmarkBase {
 
     BenchmarkDef("map_concat(int_str, int_str)", N, spark =>
       spark.read.parquet(dataPath)
-        .selectExpr("map_concat(map_int_str, map(100 + id % 10, 'new')) as m")
-        .selectExpr("count(m[0])")
+        // Access key that exists in all rows (id % 10 is always in map_int_str)
+        .selectExpr("map_concat(map_int_str, map(100 + id % 10, 'new')) as m", "id % 10 as orig_key")
+        .selectExpr("count(m[orig_key])")
     ),
 
     // ========================================
@@ -154,18 +155,21 @@ object MapFunctionsBenchmark extends GlutenBenchmarkBase {
     // ========================================
     BenchmarkDef("map_from_arrays(int, str)", N, spark =>
       spark.read.parquet(dataPath)
-        .selectExpr("map_from_arrays(arr_keys, arr_vals) as m", "arr_keys")
-        .selectExpr("count(m[arr_keys[0]])")
+        // Access first key from the same array used to construct the map
+        .selectExpr("map_from_arrays(arr_keys, arr_vals) as m", "cast(id as int) as first_key")
+        .selectExpr("count(m[first_key])")
     ),
 
     BenchmarkDef("map_from_arrays(str, int)", N, spark =>
       spark.read.parquet(dataPath)
         .selectExpr(
           "array(key_str, concat(key_str, '_2')) as str_keys",
-          "array(key_int, key_int2) as int_vals"
+          "array(key_int, key_int2) as int_vals",
+          "key_str"
         )
-        .selectExpr("map_from_arrays(str_keys, int_vals) as m", "str_keys")
-        .selectExpr("sum(m[str_keys[0]])")
+        // Access first key directly rather than via array
+        .selectExpr("map_from_arrays(str_keys, int_vals) as m", "key_str")
+        .selectExpr("sum(m[key_str])")
     ),
 
     // ========================================
