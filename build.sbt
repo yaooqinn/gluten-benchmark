@@ -8,13 +8,19 @@ lazy val glutenVersion = settingKey[String]("Gluten version")
 sparkVersion := sys.props.getOrElse("spark.version", "3.5.5")
 glutenVersion := sys.props.getOrElse("gluten.version", "1.6.0-SNAPSHOT")
 
+// Spark 4.0+ uses Scala 2.13, earlier versions use Scala 2.12
+def scalaVersionForSpark(sparkVer: String): String = {
+  if (sparkVer.startsWith("4.")) "2.13.16"
+  else "2.12.18"
+}
+
 lazy val root = (project in file("."))
   .settings(
     name := "gluten-benchmark",
     organization := "org.apache.gluten",
     version := "0.1.0-SNAPSHOT",
     
-    scalaVersion := "2.12.18",
+    scalaVersion := scalaVersionForSpark(sparkVersion.value),
     
     // Spark dependencies
     libraryDependencies ++= Seq(
@@ -79,6 +85,9 @@ lazy val root = (project in file("."))
       "--add-opens=java.base/sun.misc=ALL-UNNAMED",
       "-Dio.netty.tryReflectionSetAccessible=true"
     ),
+    
+    // Handle dependency version conflicts (Spark 4.0 has stricter requirements)
+    libraryDependencySchemes += "com.github.luben" % "zstd-jni" % VersionScheme.Always,
     
     // Enable benchmark result generation
     Test / envVars += "SPARK_GENERATE_BENCHMARK_FILES" -> sys.env.getOrElse("SPARK_GENERATE_BENCHMARK_FILES", "0"),

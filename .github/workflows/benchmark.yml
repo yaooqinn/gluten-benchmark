@@ -26,8 +26,7 @@ jobs:
     runs-on: ubuntu-22.04
     strategy:
       matrix:
-        spark: ['3.4.4', '3.5.5']
-        # Add '4.0.0' when available
+        spark: ['3.4.4', '3.5.5', '4.0.1']
       fail-fast: false
 
     steps:
