@@ -208,7 +208,21 @@ case class BenchmarkResult(
     bestTimeMs: Double,
     avgTimeMs: Double,
     stddevMs: Double,
-    relative: Double)
+    relative: Double,
+    fallbackInfo: Option[FallbackInfo] = None)
+
+/** Information about Gluten fallback */
+case class FallbackInfo(
+    glutenNodes: Int,
+    totalNodes: Int,
+    fallbackNodes: Seq[String]) {
+  def hasFallback: Boolean = fallbackNodes.nonEmpty
+  def fallbackRatio: Double = if (totalNodes > 0) fallbackNodes.size.toDouble / totalNodes else 0.0
+  def summary: String = {
+    if (fallbackNodes.isEmpty) "No fallback"
+    else s"${fallbackNodes.size} fallback nodes: ${fallbackNodes.distinct.mkString(", ")}"
+  }
+}
 
 /** Timing result for a single phased run */
 case class PhasedTiming(

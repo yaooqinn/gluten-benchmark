@@ -18,6 +18,7 @@
 package org.apache.gluten.benchmark
 
 import org.apache.spark.sql.{DataFrame, SaveMode, SparkSession}
+import org.apache.spark.sql.execution.SparkPlan
 import org.apache.spark.sql.internal.SQLConf
 
 /**
@@ -47,6 +48,50 @@ trait GlutenBenchmarkBase extends BenchmarkBase {
       true
     } catch {
       case _: ClassNotFoundException => false
+    }
+  }
+
+  /** Check if GlutenPlan class is available (for fallback detection) */
+  private lazy val glutenPlanClass: Option[Class[_]] = {
+    try {
+      Some(Class.forName("org.apache.gluten.execution.GlutenPlan"))
+    } catch {
+      case _: ClassNotFoundException => None
+    }
+  }
+
+  /** Analyze plan for fallback - returns (numGlutenNodes, numTotalNodes, fallbackNodes) */
+  protected def analyzeFallback(plan: SparkPlan): FallbackInfo = {
+    glutenPlanClass match {
+      case None => FallbackInfo(0, 0, Seq.empty)
+      case Some(glutenClass) =>
+        var glutenNodes = 0
+        var totalNodes = 0
+        val fallbackNodes = scala.collection.mutable.ArrayBuffer[String]()
+        
+        plan.foreachUp { node =>
+          totalNodes += 1
+          if (glutenClass.isInstance(node)) {
+            glutenNodes += 1
+          } else {
+            // Skip certain nodes that are expected to be non-Gluten
+            val nodeName = node.nodeName
+            if (!isExpectedNonGlutenNode(nodeName)) {
+              fallbackNodes += nodeName
+            }
+          }
+        }
+        FallbackInfo(glutenNodes, totalNodes, fallbackNodes.toSeq)
+    }
+  }
+
+  /** Nodes that are expected to not be Gluten nodes */
+  private def isExpectedNonGlutenNode(nodeName: String): Boolean = {
+    nodeName match {
+      case "AdaptiveSparkPlan" | "ResultQueryStage" | "ShuffleQueryStage" |
+           "BroadcastQueryStage" | "TableCacheQueryStage" | "ReusedExchange" |
+           "Subquery" | "SubqueryBroadcast" => true
+      case _ => false
     }
   }
 
@@ -189,10 +234,22 @@ trait GlutenBenchmarkBase extends BenchmarkBase {
     val avg = times.sum / times.length
     val stddev = math.sqrt(times.map(t => math.pow(t - avg, 2)).sum / times.length)
     
-    // Print profiling info
-    println(f"  ${benchDef.name}%-45s $best%10.0f ms (best)  $avg%10.0f ms (avg)  [plan: $planTimeMs%.0fms, first: $firstExecMs%.0fms]")
+    // Analyze fallback for Gluten sessions
+    val fallbackInfo = if (engineName == GLUTEN_VELOX) {
+      val plan = df.queryExecution.executedPlan
+      Some(analyzeFallback(plan))
+    } else {
+      None
+    }
     
-    BenchmarkResult(benchDef.name, best, avg, stddev, 1.0)
+    // Print profiling info with fallback indicator
+    val fallbackStr = fallbackInfo match {
+      case Some(info) if info.hasFallback => s" [FALLBACK: ${info.fallbackNodes.distinct.size} types]"
+      case _ => ""
+    }
+    println(f"  ${benchDef.name}%-45s $best%10.0f ms (best)  $avg%10.0f ms (avg)  [plan: $planTimeMs%.0fms, first: $firstExecMs%.0fms]$fallbackStr")
+    
+    BenchmarkResult(benchDef.name, best, avg, stddev, 1.0, fallbackInfo)
   }
 
   /** Print combined results comparing Vanilla vs Gluten */
@@ -231,6 +288,13 @@ trait GlutenBenchmarkBase extends BenchmarkBase {
           
           out.println(f"$VANILLA_SPARK%-40s ${vanilla.bestTimeMs}%12.0f ${vanilla.avgTimeMs}%12.0f ${vanilla.stddevMs}%12.1f ${1.0}%10.1fX")
           out.println(f"$GLUTEN_VELOX%-40s ${gluten.bestTimeMs}%12.0f ${gluten.avgTimeMs}%12.0f ${gluten.stddevMs}%12.1f $relative%10.1fX")
+          
+          // Print fallback info if any
+          gluten.fallbackInfo.foreach { info =>
+            if (info.hasFallback) {
+              out.println(s"  ** FALLBACK: ${info.summary}")
+            }
+          }
           out.println("-" * 80)
       }
     }
