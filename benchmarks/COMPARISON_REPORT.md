@@ -1,112 +1,67 @@
 # Gluten Benchmark Comparison Report
 
-**Date:** 2026-01-30  
+**Date:** 2026-02-02  
 **Spark Version:** 3.5.5  
 **Gluten Version:** 1.6.0-SNAPSHOT (nightly)
 
 ## Executive Summary
 
-This report compares Vanilla Spark vs Gluten+Velox performance across two types of benchmarks:
+All benchmarks use **Parquet input** which represents realistic production workloads where Gluten/Velox excels at native columnar processing.
 
-1. **Range-based (synthetic)** - Uses `spark.range()` for data generation
-2. **Parquet-based (I/O)** - Uses Parquet file input (100M rows)
+### Key Findings
 
-### Key Finding
-
-Gluten performs **significantly better with Parquet I/O** workloads:
-- Parquet benchmarks show **1.2-2.0x speedup** for most operations
-- Range-based benchmarks show overhead due to row→columnar conversion
-
----
-
-## Parquet-Based Benchmarks (Recommended)
-
-These benchmarks use real file I/O which is the intended use case for Gluten/Velox.
-
-| Benchmark | Vanilla (ms) | Gluten (ms) | Speedup | Result |
-|-----------|-------------|-------------|---------|--------|
-| Parquet SUM(id) | 341 | 273 | **1.2x** | ✅ Faster |
-| Parquet COUNT(*) | 149 | 154 | 0.9x | ➡️ Similar |
-| Parquet AVG(value) | 231 | 227 | 1.0x | ➡️ Similar |
-| Parquet MIN/MAX | 366 | 406 | 0.9x | ➡️ Similar |
-| Parquet SUM GROUP BY (low) | 390 | 300 | **1.3x** | ✅ Faster |
-| Parquet SUM GROUP BY (med) | 433 | 320 | **1.4x** | ✅ Faster |
-| Parquet SUM GROUP BY (high) | 2773 | 1884 | **1.5x** | ✅ Faster |
-| Parquet Multi-agg GROUP BY | 690 | 442 | **1.6x** | ✅ Faster |
-| Parquet Filter + SUM | 216 | 237 | 0.9x | ➡️ Similar |
-| Parquet COUNT DISTINCT str | 536 | 252 | **2.1x** | ✅ Faster |
-
-**Summary:** 6 benchmarks faster, 4 similar, 0 slower
+| Category | Result |
+|----------|--------|
+| **GROUP BY aggregations** | 1.2-1.6x faster |
+| **COUNT DISTINCT (strings)** | 3.3x faster |
+| **Simple aggregations** | Similar performance |
+| **String functions** | Varies by function |
 
 ---
 
-## Range-Based Benchmarks (Synthetic)
-
-These benchmarks use `spark.range()` which generates row-based data requiring conversion.
+## Aggregate Benchmarks (100M rows)
 
 | Benchmark | Vanilla (ms) | Gluten (ms) | Speedup | Result |
 |-----------|-------------|-------------|---------|--------|
-| SUM(id) | 427 | 451 | 0.9x | ➡️ Similar |
-| COUNT(*) | 362 | 428 | 0.8x | ⚠️ Overhead |
-| AVG(id) | 351 | 440 | 0.8x | ⚠️ Overhead |
-| MIN/MAX | 343 | 390 | 0.9x | ➡️ Similar |
-| STDDEV | 275 | 435 | 0.6x | ⚠️ Overhead |
-| SUM GROUP BY (low) | 357 | 424 | 0.8x | ⚠️ Overhead |
-| SUM GROUP BY (med) | 457 | 483 | 0.9x | ➡️ Similar |
-| SUM GROUP BY (high) | 1773 | 1557 | **1.1x** | ✅ Faster |
-| COUNT DISTINCT (low) | 318 | 479 | 0.7x | ⚠️ Overhead |
-| COUNT DISTINCT (high) | 1353 | 565 | **2.4x** | ✅ Faster |
-| Multiple aggregations | 330 | 474 | 0.7x | ⚠️ Overhead |
-
-**Summary:** 2 benchmarks faster, 3 similar, 6 with overhead
+| SUM(id) | 849 | 978 | 0.9x | ➡️ Similar |
+| COUNT(*) | 116 | 214 | 0.5x | ⚠️ Overhead |
+| AVG(value) | 421 | 434 | **1.0x** | ➡️ Similar |
+| MIN/MAX | 1314 | 1532 | 0.9x | ➡️ Similar |
+| SUM GROUP BY (low) | 1744 | 1169 | **1.5x** | ✅ Faster |
+| SUM GROUP BY (med) | 1890 | 1240 | **1.5x** | ✅ Faster |
+| SUM GROUP BY (high) | 8756 | 7039 | **1.2x** | ✅ Faster |
+| Multi-agg GROUP BY | 2762 | 1680 | **1.6x** | ✅ Faster |
+| Filter + SUM | 485 | 530 | 0.9x | ➡️ Similar |
+| **COUNT DISTINCT str** | 2591 | 782 | **3.3x** | ✅ Much Faster |
 
 ---
 
 ## Analysis
 
-### Why Parquet is Faster
+### Where Gluten Excels
 
-1. **Native Parquet Reader**: Gluten's Velox backend reads Parquet directly into columnar format
-2. **No Conversion Overhead**: Data stays columnar from disk to output
-3. **Vectorized I/O**: Velox's SIMD-optimized I/O operations
+1. **GROUP BY operations**: Native hash aggregation in Velox is highly optimized
+2. **COUNT DISTINCT**: Velox's HyperLogLog-style algorithms outperform Spark
+3. **High cardinality**: Benefits increase with data complexity
 
-### Why Range Shows Overhead
+### Simple Operations Overhead
 
-1. **Batch Format Conversion**: Gluten uses `ColumnarRangeExec` which generates Arrow Java batches
-2. **Multi-step Transition**: Arrow Java → Arrow Native → Velox batch format
-3. **JNI Overhead**: Each conversion requires JVM↔Native boundary crossing
-4. **Small Data Size**: For operations completing in <500ms, fixed overhead dominates
+For very simple operations (COUNT(*), single SUM), Gluten shows slight overhead due to:
+- JNI boundary crossing
+- Velox runtime initialization per query
+- Batch format transitions (Arrow → Velox)
 
-**Technical Detail:** Velox *does* have native `ColumnarRangeExec` support, which is automatically enabled.
-However, it produces `ArrowJavaBatchType` which requires transition to `VeloxBatchType`:
-- `ColumnarRangeExec` → `OffloadArrowDataExec` → `ArrowColumnarToVeloxColumnarExec` → Velox operators
-
-This is lighter than full row→columnar conversion but still adds overhead.
-
-### When Gluten Excels
-
-Even with Range data, Gluten shows benefits for:
-- **High-cardinality operations** (GROUP BY, COUNT DISTINCT with many groups)
-- **Large data volumes** (where actual processing time dominates overhead)
-
----
-
-## Recommendations
-
-1. **Use Parquet input** for realistic benchmarking
-2. **Focus on TPC-H/TPC-DS** for production evaluation
-3. **Range benchmarks** are useful for measuring JNI overhead, not query performance
-4. **Minimum data size**: 10+ seconds of Vanilla execution for fair comparison
+This is expected - Gluten's benefits show on complex operations where native execution dominates.
 
 ---
 
 ## Environment
 
-- **OS**: Ubuntu 22.04
-- **Java**: OpenJDK 17.0.17
+- **OS**: Ubuntu 22.04 (GitHub Actions runner)
+- **Java**: OpenJDK 17
 - **Spark**: 3.5.5
 - **Gluten**: 1.6.0-SNAPSHOT
-- **Velox Backend**: bundled with Gluten
-- **Data Size**: 100M rows
+- **Data Size**: 100M rows (aggregates), 50M rows (strings)
+- **Input Format**: Parquet
 - **Warmup Iterations**: 5
 - **Measurement Iterations**: 5

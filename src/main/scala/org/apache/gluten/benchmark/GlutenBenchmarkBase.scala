@@ -157,7 +157,7 @@ trait GlutenBenchmarkBase extends BenchmarkBase {
     
     // Measure query planning time
     val planStart = System.nanoTime()
-    val plan = df.queryExecution.executedPlan
+    df.queryExecution.executedPlan // Force plan generation
     val planEnd = System.nanoTime()
     val planTimeMs = (planEnd - planStart) / 1e6
     
