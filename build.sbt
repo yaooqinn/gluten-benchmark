@@ -10,7 +10,8 @@ glutenVersion := sys.props.getOrElse("gluten.version", "1.6.0-SNAPSHOT")
 
 // Spark 4.0+ uses Scala 2.13, earlier versions use Scala 2.12
 def scalaVersionForSpark(sparkVer: String): String = {
-  if (sparkVer.startsWith("4.")) "2.13.16"
+  if (sparkVer.startsWith("4.1")) "2.13.17"
+  else if (sparkVer.startsWith("4.")) "2.13.16"
   else "2.12.18"
 }
 
@@ -27,9 +28,18 @@ lazy val root = (project in file("."))
       "org.apache.spark" %% "spark-sql" % sparkVersion.value,
       "org.apache.spark" %% "spark-core" % sparkVersion.value,
       "org.apache.spark" %% "spark-catalyst" % sparkVersion.value,
-      "org.apache.spark" %% "spark-hive" % sparkVersion.value,  // Required by Gluten for Hive support
-      
-      // Spark test jars for Benchmark utilities
+      "org.apache.spark" %% "spark-hive" % sparkVersion.value  // Required by Gluten for Hive support
+    ),
+    
+    // Spark 4.0+ requires spark-sql-api as a separate artifact
+    libraryDependencies ++= {
+      if (sparkVersion.value.startsWith("4."))
+        Seq("org.apache.spark" %% "spark-sql-api" % sparkVersion.value)
+      else Seq.empty
+    },
+    
+    // Spark test jars for Benchmark utilities
+    libraryDependencies ++= Seq(
       "org.apache.spark" %% "spark-core" % sparkVersion.value % "test" classifier "tests",
       "org.apache.spark" %% "spark-sql" % sparkVersion.value % "test" classifier "tests",
       "org.apache.spark" %% "spark-catalyst" % sparkVersion.value % "test" classifier "tests",

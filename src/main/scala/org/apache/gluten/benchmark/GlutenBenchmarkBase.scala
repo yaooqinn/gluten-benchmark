@@ -62,26 +62,23 @@ trait GlutenBenchmarkBase extends BenchmarkBase {
   // ============================================================
 
   override def runBenchmarkSuite(mainArgs: Array[String]): Unit = {
-    // Check Gluten availability first
+    // Check if running in Vanilla-only mode (Gluten not available or explicitly disabled)
+    val vanillaOnly = !glutenAvailable || sys.props.getOrElse("benchmark.vanilla.only", "false").toBoolean
+    
     if (!glutenAvailable) {
       System.err.println(
         """
           |================================================================================
-          |ERROR: Gluten is not available on the classpath!
+          |WARNING: Gluten is not available on the classpath!
           |================================================================================
           |
-          |The Gluten JAR is required to run performance comparisons.
-          |
-          |To download the nightly build, run:
+          |Running in Vanilla-only mode. To enable Gluten comparison:
           |  ./scripts/download-gluten-nightly.sh
           |
           |Or specify a custom JAR path:
           |  ./build/sbt -Dgluten.jar=/path/to/gluten-velox-bundle.jar "runMain ..."
-          |
-          |After downloading, the JAR will be auto-detected from lib/ directory.
           |================================================================================
         """.stripMargin)
-      throw new RuntimeException("Gluten JAR not found. Run: ./scripts/download-gluten-nightly.sh")
     }
 
     // Optional filter from command line
@@ -99,14 +96,16 @@ trait GlutenBenchmarkBase extends BenchmarkBase {
     }
 
     // Run all benchmarks with shared sessions
-    runAllBenchmarksWithSharedSessions(toRun)
+    runAllBenchmarksWithSharedSessions(toRun, vanillaOnly)
   }
 
   /**
    * Run all benchmarks with shared SparkSessions.
    * Creates one Vanilla session for all Vanilla runs, one Gluten session for all Gluten runs.
    */
-  private def runAllBenchmarksWithSharedSessions(benchDefs: Seq[BenchmarkDef]): Unit = {
+  private def runAllBenchmarksWithSharedSessions(
+      benchDefs: Seq[BenchmarkDef],
+      vanillaOnly: Boolean = false): Unit = {
     // Phase 1: Run all benchmarks on Vanilla Spark
     println(s"\n${"=" * 80}")
     println("Running benchmarks with Vanilla Spark")
@@ -123,24 +122,30 @@ trait GlutenBenchmarkBase extends BenchmarkBase {
       SparkSession.clearDefaultSession()
     }
 
-    // Phase 2: Run all benchmarks on Gluten + Velox
-    println(s"\n${"=" * 80}")
-    println("Running benchmarks with Gluten + Velox")
-    println("=" * 80)
-    
-    val glutenSpark = createSparkSession(glutenEnabled = true)
-    val glutenResults = try {
-      benchDefs.map { benchDef =>
-        runBenchmarkWithSession(benchDef, glutenSpark, GLUTEN_VELOX)
+    // Phase 2: Run all benchmarks on Gluten + Velox (if available)
+    val glutenResults: Seq[BenchmarkResult] = if (vanillaOnly) {
+      println(s"\n${"=" * 80}")
+      println("Skipping Gluten benchmarks (Vanilla-only mode)")
+      println("=" * 80)
+      Seq.empty[BenchmarkResult]
+    } else {
+      println(s"\n${"=" * 80}")
+      println("Running benchmarks with Gluten + Velox")
+      println("=" * 80)
+      val glutenSpark = createSparkSession(glutenEnabled = true)
+      try {
+        benchDefs.map { benchDef =>
+          runBenchmarkWithSession(benchDef, glutenSpark, GLUTEN_VELOX)
+        }
+      } finally {
+        glutenSpark.stop()
+        SparkSession.clearActiveSession()
+        SparkSession.clearDefaultSession()
       }
-    } finally {
-      glutenSpark.stop()
-      SparkSession.clearActiveSession()
-      SparkSession.clearDefaultSession()
     }
 
     // Phase 3: Print combined results
-    printCombinedResults(benchDefs, vanillaResults, glutenResults)
+    printCombinedResults(benchDefs, vanillaResults, glutenResults, vanillaOnly)
   }
 
   /** Run a single benchmark with an existing session */
@@ -194,24 +199,40 @@ trait GlutenBenchmarkBase extends BenchmarkBase {
   private def printCombinedResults(
       benchDefs: Seq[BenchmarkDef],
       vanillaResults: Seq[BenchmarkResult],
-      glutenResults: Seq[BenchmarkResult]): Unit = {
+      glutenResults: Seq[BenchmarkResult],
+      vanillaOnly: Boolean = false): Unit = {
     
     val out = output.map(new java.io.PrintStream(_)).getOrElse(System.out)
     
-    benchDefs.zip(vanillaResults.zip(glutenResults)).foreach {
-      case (benchDef, (vanilla, gluten)) =>
-        out.println()
-        out.println(s"${benchDef.name}:")
-        out.println("-" * 80)
-        out.printf("%-40s %12s %12s %12s %10s\n",
-          "", "Best Time(ms)", "Avg Time(ms)", "Stdev(ms)", "Relative")
-        out.println("-" * 80)
-        
-        val relative = vanilla.avgTimeMs / gluten.avgTimeMs
-        
-        out.println(f"$VANILLA_SPARK%-40s ${vanilla.bestTimeMs}%12.0f ${vanilla.avgTimeMs}%12.0f ${vanilla.stddevMs}%12.1f ${1.0}%10.1fX")
-        out.println(f"$GLUTEN_VELOX%-40s ${gluten.bestTimeMs}%12.0f ${gluten.avgTimeMs}%12.0f ${gluten.stddevMs}%12.1f $relative%10.1fX")
-        out.println("-" * 80)
+    if (vanillaOnly) {
+      // Vanilla-only mode: just print vanilla results
+      benchDefs.zip(vanillaResults).foreach {
+        case (benchDef, vanilla) =>
+          out.println()
+          out.println(s"${benchDef.name}:")
+          out.println("-" * 80)
+          out.printf("%-40s %12s %12s %12s %10s\n",
+            "", "Best Time(ms)", "Avg Time(ms)", "Stdev(ms)", "Relative")
+          out.println("-" * 80)
+          out.println(f"$VANILLA_SPARK%-40s ${vanilla.bestTimeMs}%12.0f ${vanilla.avgTimeMs}%12.0f ${vanilla.stddevMs}%12.1f ${1.0}%10.1fX")
+          out.println("-" * 80)
+      }
+    } else {
+      benchDefs.zip(vanillaResults.zip(glutenResults)).foreach {
+        case (benchDef, (vanilla, gluten)) =>
+          out.println()
+          out.println(s"${benchDef.name}:")
+          out.println("-" * 80)
+          out.printf("%-40s %12s %12s %12s %10s\n",
+            "", "Best Time(ms)", "Avg Time(ms)", "Stdev(ms)", "Relative")
+          out.println("-" * 80)
+          
+          val relative = vanilla.avgTimeMs / gluten.avgTimeMs
+          
+          out.println(f"$VANILLA_SPARK%-40s ${vanilla.bestTimeMs}%12.0f ${vanilla.avgTimeMs}%12.0f ${vanilla.stddevMs}%12.1f ${1.0}%10.1fX")
+          out.println(f"$GLUTEN_VELOX%-40s ${gluten.bestTimeMs}%12.0f ${gluten.avgTimeMs}%12.0f ${gluten.stddevMs}%12.1f $relative%10.1fX")
+          out.println("-" * 80)
+      }
     }
     out.println()
   }

@@ -60,9 +60,6 @@ jobs:
           echo "date=$(date +%Y-%m-%d)" >> $GITHUB_OUTPUT
 
       - name: Download Gluten JAR
-        # Gluten 4.0 nightly is incompatible with Spark 4.0.0 GA - skip for Spark 4.x
-        # The benchmark framework will run in Vanilla-only mode when Gluten JAR is missing
-        if: ${{ !startsWith(matrix.spark, '4.') }}
         run: |
           # Extract major.minor version (e.g., 3.5.5 -> 3.5)
           SPARK_MAJOR_MINOR=$(echo "${{ matrix.spark }}" | sed 's/\([0-9]*\.[0-9]*\)\..*/\1/')
