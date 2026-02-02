@@ -129,16 +129,41 @@ object AggregateBenchmark extends GlutenBenchmarkBase {
     ),
 
     // Collection aggregations (use high cardinality key to limit array sizes)
-    BenchmarkDef("collect_list", N, spark =>
+    // Test with different types: int, double, string
+    BenchmarkDef("collect_list(int)", N, spark =>
       spark.read.parquet(dataPath)
         .groupBy("key_high")
         .agg("key_low" -> "collect_list")
     ),
 
-    BenchmarkDef("collect_set", N, spark =>
+    BenchmarkDef("collect_list(double)", N, spark =>
+      spark.read.parquet(dataPath)
+        .groupBy("key_high")
+        .agg("value" -> "collect_list")
+    ),
+
+    BenchmarkDef("collect_list(string)", N, spark =>
+      spark.read.parquet(dataPath)
+        .groupBy("key_high")
+        .agg("str_col" -> "collect_list")
+    ),
+
+    BenchmarkDef("collect_set(int)", N, spark =>
       spark.read.parquet(dataPath)
         .groupBy("key_high")
         .agg("key_low" -> "collect_set")
+    ),
+
+    BenchmarkDef("collect_set(double)", N, spark =>
+      spark.read.parquet(dataPath)
+        .groupBy("key_high")
+        .agg("value" -> "collect_set")
+    ),
+
+    BenchmarkDef("collect_set(string)", N, spark =>
+      spark.read.parquet(dataPath)
+        .groupBy("key_high")
+        .agg("str_col" -> "collect_set")
     )
   )
 }
