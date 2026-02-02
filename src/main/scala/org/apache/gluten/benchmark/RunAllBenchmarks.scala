@@ -30,7 +30,8 @@ object RunAllBenchmarks {
   // Registry of all benchmark objects
   private val allBenchmarks: Seq[GlutenBenchmarkBase] = Seq(
     aggregate.AggregateBenchmark,
-    functions.StringFunctionsBenchmark
+    functions.StringFunctionsBenchmark,
+    functions.MapFunctionsBenchmark
     // Add more benchmarks here as they are created
     // join.JoinBenchmark,
     // scan.ScanBenchmark,
