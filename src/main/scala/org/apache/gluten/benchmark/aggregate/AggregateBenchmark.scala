@@ -126,6 +126,19 @@ object AggregateBenchmark extends GlutenBenchmarkBase {
     BenchmarkDef("COUNT DISTINCT str", N, spark =>
       spark.read.parquet(dataPath)
         .selectExpr("count(distinct str_col)")
+    ),
+
+    // Collection aggregations (use high cardinality key to limit array sizes)
+    BenchmarkDef("collect_list", N, spark =>
+      spark.read.parquet(dataPath)
+        .groupBy("key_high")
+        .agg("key_low" -> "collect_list")
+    ),
+
+    BenchmarkDef("collect_set", N, spark =>
+      spark.read.parquet(dataPath)
+        .groupBy("key_high")
+        .agg("key_low" -> "collect_set")
     )
   )
 }
