@@ -26,7 +26,7 @@ jobs:
     runs-on: ubuntu-22.04
     strategy:
       matrix:
-        spark: ['3.4.4', '3.5.5', '4.0.1']
+        spark: ['3.4.4', '3.5.5', '4.1.1']
       fail-fast: false
 
     steps:
@@ -60,6 +60,9 @@ jobs:
           echo "date=$(date +%Y-%m-%d)" >> $GITHUB_OUTPUT
 
       - name: Download Gluten JAR
+        # Gluten doesn't support Spark 4.x yet, so skip download for those versions
+        # The benchmark framework will run in Vanilla-only mode when Gluten JAR is missing
+        if: ${{ !startsWith(matrix.spark, '4.') }}
         run: |
           # Extract major.minor version (e.g., 3.5.5 -> 3.5)
           SPARK_MAJOR_MINOR=$(echo "${{ matrix.spark }}" | sed 's/\([0-9]*\.[0-9]*\)\..*/\1/')
