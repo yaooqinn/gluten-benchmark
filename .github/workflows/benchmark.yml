@@ -26,7 +26,7 @@ jobs:
     runs-on: ubuntu-22.04
     strategy:
       matrix:
-        spark: ['3.4.4', '3.5.5', '4.1.1']
+        spark: ['3.4.4', '3.5.5', '4.0.0']
       fail-fast: false
 
     steps:
@@ -60,7 +60,7 @@ jobs:
           echo "date=$(date +%Y-%m-%d)" >> $GITHUB_OUTPUT
 
       - name: Download Gluten JAR
-        # Gluten doesn't support Spark 4.x yet, so skip download for those versions
+        # Gluten 4.0 nightly is incompatible with Spark 4.0.0 GA - skip for Spark 4.x
         # The benchmark framework will run in Vanilla-only mode when Gluten JAR is missing
         if: ${{ !startsWith(matrix.spark, '4.') }}
         run: |
