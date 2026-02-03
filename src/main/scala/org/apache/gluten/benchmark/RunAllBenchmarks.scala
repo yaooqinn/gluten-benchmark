@@ -32,7 +32,8 @@ object RunAllBenchmarks {
     aggregate.AggregateBenchmark,
     functions.StringFunctionsBenchmark,
     functions.MapFunctionsBenchmark,
-    functions.ExplodeBenchmark
+    functions.ExplodeBenchmark,
+    functions.HigherOrderFunctionsBenchmark
     // Add more benchmarks here as they are created
     // join.JoinBenchmark,
     // scan.ScanBenchmark,
