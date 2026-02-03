@@ -35,11 +35,13 @@ trait GlutenBenchmarkBase extends BenchmarkBase {
   /** Default cardinality for benchmarks */
   def defaultCardinality: Long = 10000000L
 
-  /** Number of warmup iterations - increased to amortize Velox JIT compilation */
-  protected def numWarmupIters: Int = 5
+  /** Number of warmup iterations - configurable via system property */
+  protected def numWarmupIters: Int = 
+    sys.props.getOrElse("benchmark.warmup.iters", "5").toInt
 
-  /** Number of measurement iterations */
-  protected def numIters: Int = 5
+  /** Number of measurement iterations - configurable via system property */
+  protected def numIters: Int = 
+    sys.props.getOrElse("benchmark.iters", "5").toInt
 
   /** Define your benchmarks here */
   def benchmarks: Seq[BenchmarkDef]

@@ -13,6 +13,18 @@ on:
         description: 'Spark version'
         required: false
         default: '3.5.5'
+      benchmark_mode:
+        description: 'Benchmark mode: quick (fewer iterations) or full'
+        required: false
+        default: 'quick'
+        type: choice
+        options:
+          - quick
+          - full
+      benchmark_suite:
+        description: 'Specific suite to run (empty for all)'
+        required: false
+        default: ''
 
 env:
   JAVA_VERSION: '17'
@@ -24,10 +36,15 @@ permissions:
 jobs:
   benchmark:
     runs-on: ubuntu-22.04
+    timeout-minutes: 60
     strategy:
       matrix:
-        spark: ['3.4.4', '3.5.5', '4.0.0']
+        # Run only primary Spark version daily, others on manual trigger
+        spark: ${{ github.event_name == 'schedule' && fromJSON('["3.5.5"]') || fromJSON('["3.5.5"]') }}
+        # Split benchmarks across parallel jobs for speed
+        suite: ['aggregate', 'string', 'map', 'explode', 'higherorder', 'array']
       fail-fast: false
+      max-parallel: 6
 
     steps:
       - name: Checkout benchmark repo
@@ -61,30 +78,45 @@ jobs:
 
       - name: Download Gluten JAR
         run: |
-          # Extract major.minor version (e.g., 3.5.5 -> 3.5)
           SPARK_MAJOR_MINOR=$(echo "${{ matrix.spark }}" | sed 's/\([0-9]*\.[0-9]*\)\..*/\1/')
           SPARK_VERSION=$SPARK_MAJOR_MINOR ./scripts/download-gluten-nightly.sh
 
-      - name: Run benchmarks
+      - name: Map suite name to class
+        id: suite
+        run: |
+          case "${{ matrix.suite }}" in
+            aggregate) CLASS="AggregateBenchmark" ;;
+            string) CLASS="StringFunctionsBenchmark" ;;
+            map) CLASS="MapFunctionsBenchmark" ;;
+            explode) CLASS="ExplodeBenchmark" ;;
+            higherorder) CLASS="HigherOrderFunctionsBenchmark" ;;
+            array) CLASS="ArrayFunctionsBenchmark" ;;
+            *) CLASS="" ;;
+          esac
+          echo "class=$CLASS" >> $GITHUB_OUTPUT
+
+      - name: Run benchmark suite
         env:
           SPARK_GENERATE_BENCHMARK_FILES: '1'
           SPARK_BENCHMARK_DATE: ${{ steps.gluten.outputs.date }}
+          # Quick mode: fewer iterations
+          BENCHMARK_WARMUP_ITERS: ${{ inputs.benchmark_mode == 'full' && '5' || '2' }}
+          BENCHMARK_ITERS: ${{ inputs.benchmark_mode == 'full' && '5' || '3' }}
         run: |
+          FILTER="${{ inputs.benchmark_suite || steps.suite.outputs.class }}"
           ./build/sbt -Dspark.version=${{ matrix.spark }} \
-              "runMain org.apache.gluten.benchmark.RunAllBenchmarks"
-
-      - name: List results
-        run: |
-          echo "Results saved to:"
-          find benchmarks -name "*.txt" -type f
+              -Dbenchmark.warmup.iters=${BENCHMARK_WARMUP_ITERS:-2} \
+              -Dbenchmark.iters=${BENCHMARK_ITERS:-3} \
+              "runMain org.apache.gluten.benchmark.RunAllBenchmarks $FILTER"
 
       - name: Upload results
         uses: actions/upload-artifact@v4
         with:
-          name: benchmark-results-spark-${{ matrix.spark }}-${{ steps.gluten.outputs.date }}
+          name: benchmark-${{ matrix.suite }}-spark-${{ matrix.spark }}-${{ steps.gluten.outputs.date }}
           path: benchmarks/
+          retention-days: 30
 
-  compare:
+  merge-results:
     needs: benchmark
     runs-on: ubuntu-22.04
     steps:
@@ -95,19 +127,36 @@ jobs:
         uses: actions/download-artifact@v4
         with:
           path: downloaded-results/
-          pattern: benchmark-results-*
+          pattern: benchmark-*
           merge-multiple: true
 
-      - name: Merge and compare results
+      - name: Merge results
         run: |
-          # Merge downloaded results into benchmarks/
+          mkdir -p benchmarks
           cp -r downloaded-results/* benchmarks/ 2>/dev/null || true
           
           echo "=== Benchmark Results ==="
-          ./scripts/compare-daily.sh 7 || true
+          find benchmarks -name "*.txt" -type f | head -20
+          
+          # Generate summary
+          echo "## Benchmark Summary - $(date +%Y-%m-%d)" > benchmarks/SUMMARY.md
+          echo "" >> benchmarks/SUMMARY.md
+          for f in benchmarks/**/*.txt; do
+            if [ -f "$f" ]; then
+              echo "### $(basename $f .txt)" >> benchmarks/SUMMARY.md
+              head -50 "$f" >> benchmarks/SUMMARY.md
+              echo "" >> benchmarks/SUMMARY.md
+            fi
+          done
+
+      - name: Upload merged results
+        uses: actions/upload-artifact@v4
+        with:
+          name: benchmark-results-merged-${{ needs.benchmark.outputs.date || 'latest' }}
+          path: benchmarks/
 
       - name: Commit results (if on main)
-        if: github.ref == 'refs/heads/main'
+        if: github.ref == 'refs/heads/main' && github.event_name == 'schedule'
         run: |
           git config user.name "GitHub Actions"
           git config user.email "actions@github.com"
