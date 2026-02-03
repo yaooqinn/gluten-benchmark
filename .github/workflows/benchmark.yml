@@ -104,10 +104,11 @@ jobs:
           BENCHMARK_ITERS: ${{ inputs.benchmark_mode == 'full' && '5' || '3' }}
         run: |
           FILTER="${{ inputs.benchmark_suite || steps.suite.outputs.class }}"
+          # Use fast runner for better session reuse
           ./build/sbt -Dspark.version=${{ matrix.spark }} \
               -Dbenchmark.warmup.iters=${BENCHMARK_WARMUP_ITERS:-2} \
               -Dbenchmark.iters=${BENCHMARK_ITERS:-3} \
-              "runMain org.apache.gluten.benchmark.RunAllBenchmarks $FILTER"
+              "runMain org.apache.gluten.benchmark.RunAllBenchmarksFast $FILTER"
 
       - name: Upload results
         uses: actions/upload-artifact@v4
