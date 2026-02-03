@@ -33,7 +33,8 @@ object RunAllBenchmarks {
     functions.StringFunctionsBenchmark,
     functions.MapFunctionsBenchmark,
     functions.ExplodeBenchmark,
-    functions.HigherOrderFunctionsBenchmark
+    functions.HigherOrderFunctionsBenchmark,
+    functions.ArrayFunctionsBenchmark
     // Add more benchmarks here as they are created
     // join.JoinBenchmark,
     // scan.ScanBenchmark,
