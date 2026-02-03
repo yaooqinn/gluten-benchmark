@@ -17,9 +17,12 @@
 
 package org.apache.gluten.benchmark
 
+import org.apache.spark.scheduler.{SparkListener, SparkListenerEvent}
 import org.apache.spark.sql.{DataFrame, SaveMode, SparkSession}
 import org.apache.spark.sql.execution.SparkPlan
 import org.apache.spark.sql.internal.SQLConf
+
+import scala.collection.mutable
 
 /**
  * Base trait for Gluten micro-benchmarks.
@@ -60,37 +63,200 @@ trait GlutenBenchmarkBase extends BenchmarkBase {
     }
   }
 
-  /** Analyze plan for fallback - returns (numGlutenNodes, numTotalNodes, fallbackNodes) */
+  /** Check if GlutenPlanFallbackEvent class is available */
+  private lazy val glutenFallbackEventClass: Option[Class[_]] = {
+    try {
+      Some(Class.forName("org.apache.gluten.events.GlutenPlanFallbackEvent"))
+    } catch {
+      case _: ClassNotFoundException => None
+    }
+  }
+
+  /** Listener to capture Gluten fallback events */
+  private class GlutenFallbackListener extends SparkListener {
+    val fallbackReasons: mutable.Map[String, String] = mutable.Map.empty
+    var numFallbackNodes: Int = 0
+    var numGlutenNodes: Int = 0
+
+    override def onOtherEvent(event: SparkListenerEvent): Unit = {
+      glutenFallbackEventClass.foreach { eventClass =>
+        if (eventClass.isInstance(event)) {
+          // Use reflection to access GlutenPlanFallbackEvent fields
+          try {
+            val numFallbackMethod = eventClass.getMethod("numFallbackNodes")
+            val numGlutenMethod = eventClass.getMethod("numGlutenNodes")
+            val fallbackReasonsMethod = eventClass.getMethod("fallbackNodeToReason")
+
+            numFallbackNodes = numFallbackMethod.invoke(event).asInstanceOf[Int]
+            numGlutenNodes = numGlutenMethod.invoke(event).asInstanceOf[Int]
+            val reasons = fallbackReasonsMethod.invoke(event).asInstanceOf[Map[String, String]]
+            fallbackReasons ++= reasons
+          } catch {
+            case _: Exception => // Ignore reflection errors
+          }
+        }
+      }
+    }
+
+    def clear(): Unit = {
+      fallbackReasons.clear()
+      numFallbackNodes = 0
+      numGlutenNodes = 0
+    }
+
+    def toFallbackInfo: FallbackInfo = {
+      FallbackInfo(
+        numGlutenNodes,
+        numGlutenNodes + numFallbackNodes,
+        fallbackReasons.keys.toSeq,
+        fallbackReasons.toMap
+      )
+    }
+  }
+
+  /** Thread-local fallback listener */
+  private val fallbackListener = new ThreadLocal[GlutenFallbackListener]()
+
+  /** Register fallback listener on Spark session */
+  private def registerFallbackListener(spark: SparkSession): GlutenFallbackListener = {
+    val listener = new GlutenFallbackListener()
+    spark.sparkContext.addSparkListener(listener)
+    fallbackListener.set(listener)
+    listener
+  }
+
+  /** Get current fallback info and clear listener */
+  private def getFallbackInfo(): FallbackInfo = {
+    Option(fallbackListener.get()).map { listener =>
+      val info = listener.toFallbackInfo
+      listener.clear()
+      info
+    }.getOrElse(FallbackInfo(0, 0, Seq.empty))
+  }
+
+  /** FallbackTags class for extracting fallback reasons from plan nodes */
+  private lazy val fallbackTagsClass: Option[(Class[_], java.lang.reflect.Method, java.lang.reflect.Method)] = {
+    try {
+      val clazz = Class.forName("org.apache.gluten.extension.columnar.FallbackTags$")
+      val instance = clazz.getField("MODULE$").get(null)
+      val getMethod = clazz.getMethod("get", classOf[org.apache.spark.sql.catalyst.trees.TreeNode[_]])
+      val nonEmptyMethod = clazz.getMethod("nonEmpty", classOf[SparkPlan])
+      Some((clazz, getMethod, nonEmptyMethod))
+    } catch {
+      case _: Exception => None
+    }
+  }
+
+  /** Extract fallback reason from a plan node using FallbackTags */
+  private def getFallbackReason(node: SparkPlan): Option[String] = {
+    fallbackTagsClass.flatMap { case (clazz, getMethod, nonEmptyMethod) =>
+      try {
+        val instance = clazz.getField("MODULE$").get(null)
+        val hasTag = nonEmptyMethod.invoke(instance, node).asInstanceOf[Boolean]
+        if (hasTag) {
+          val tag = getMethod.invoke(instance, node)
+          // Get the reason from the tag
+          val reasonMethod = tag.getClass.getMethod("reason")
+          Some(reasonMethod.invoke(tag).asInstanceOf[String])
+        } else {
+          None
+        }
+      } catch {
+        case _: Exception => None
+      }
+    }
+  }
+
+  /** Analyze plan for fallback - combines plan analysis with FallbackTags detection */
   protected def analyzeFallback(plan: SparkPlan): FallbackInfo = {
+    // First check if we have event-based fallback info
+    val eventInfo = getFallbackInfo()
+    if (eventInfo.hasFallback) {
+      return eventInfo
+    }
+
+    // Fall back to plan-based analysis with FallbackTags
     glutenPlanClass match {
       case None => FallbackInfo(0, 0, Seq.empty)
       case Some(glutenClass) =>
         var glutenNodes = 0
         var totalNodes = 0
         val fallbackNodes = scala.collection.mutable.ArrayBuffer[String]()
+        val fallbackReasons = mutable.Map[String, String]()
         
         plan.foreachUp { node =>
           totalNodes += 1
           if (glutenClass.isInstance(node)) {
             glutenNodes += 1
-          } else {
-            // Skip certain nodes that are expected to be non-Gluten
+          } else if (isRealFallback(node.nodeName)) {
+            // This is a real fallback - a Spark node that should have been Gluten
             val nodeName = node.nodeName
-            if (!isExpectedNonGlutenNode(nodeName)) {
-              fallbackNodes += nodeName
+            fallbackNodes += nodeName
+            // Try to get fallback reason from FallbackTags
+            getFallbackReason(node).foreach { reason =>
+              fallbackReasons(nodeName) = reason
             }
           }
+          // Note: isExpectedNonGlutenNode nodes are neither counted as Gluten nor fallback
         }
-        FallbackInfo(glutenNodes, totalNodes, fallbackNodes.toSeq)
+        FallbackInfo(glutenNodes, totalNodes, fallbackNodes.toSeq, fallbackReasons.toMap)
     }
+  }
+
+  /** Analyze logical plan for FallbackTags */
+  private def analyzeLogicalFallback(plan: org.apache.spark.sql.catalyst.plans.logical.LogicalPlan): FallbackInfo = {
+    val fallbackReasons = mutable.Map[String, String]()
+    
+    fallbackTagsClass.foreach { case (clazz, _, nonEmptyMethod) =>
+      try {
+        val instance = clazz.getField("MODULE$").get(null)
+        val getMethod = clazz.getMethod("get", classOf[org.apache.spark.sql.catalyst.trees.TreeNode[_]])
+        
+        plan.foreachUp { node =>
+          try {
+            // Use reflection since TreeNode is the common parent
+            val hasTagMethod = clazz.getMethod("nonEmpty", classOf[org.apache.spark.sql.catalyst.trees.TreeNode[_]])
+            val hasTag = hasTagMethod.invoke(instance, node.asInstanceOf[org.apache.spark.sql.catalyst.trees.TreeNode[_]]).asInstanceOf[Boolean]
+            if (hasTag) {
+              val tag = getMethod.invoke(instance, node.asInstanceOf[org.apache.spark.sql.catalyst.trees.TreeNode[_]])
+              val reasonMethod = tag.getClass.getMethod("reason")
+              val reason = reasonMethod.invoke(tag).asInstanceOf[String]
+              fallbackReasons(node.nodeName) = reason
+            }
+          } catch {
+            case _: Exception => // Ignore individual node errors
+          }
+        }
+      } catch {
+        case _: Exception => // Ignore reflection errors
+      }
+    }
+    
+    FallbackInfo(0, 0, fallbackReasons.keys.toSeq, fallbackReasons.toMap)
   }
 
   /** Nodes that are expected to not be Gluten nodes */
   private def isExpectedNonGlutenNode(nodeName: String): Boolean = {
     nodeName match {
+      // AQE infrastructure nodes
       case "AdaptiveSparkPlan" | "ResultQueryStage" | "ShuffleQueryStage" |
            "BroadcastQueryStage" | "TableCacheQueryStage" | "ReusedExchange" |
            "Subquery" | "SubqueryBroadcast" => true
+      // Columnar-to-row conversion (expected when Gluten is used)
+      case name if name.contains("ColumnarToRow") || name.contains("RowToColumnar") => true
+      // Gluten's own infrastructure nodes
+      case name if name.contains("Carrier") || name.contains("Velox") => true
+      case _ => false
+    }
+  }
+
+  /** Check if a non-Gluten node represents a real fallback (not just infrastructure) */
+  private def isRealFallback(nodeName: String): Boolean = {
+    // These Spark nodes indicate actual fallback when they appear in a Gluten plan
+    nodeName match {
+      case "Project" | "ProjectExec" | "Filter" | "FilterExec" |
+           "HashAggregate" | "HashAggregateExec" | "SortAggregate" | "SortAggregateExec" |
+           "Sort" | "SortExec" | "Generate" | "GenerateExec" => true
       case _ => false
     }
   }
@@ -236,8 +402,19 @@ trait GlutenBenchmarkBase extends BenchmarkBase {
     
     // Analyze fallback for Gluten sessions
     val fallbackInfo = if (engineName == GLUTEN_VELOX) {
-      val plan = df.queryExecution.executedPlan
-      Some(analyzeFallback(plan))
+      // Check both executed plan and logical plan for fallback info
+      val executedPlan = df.queryExecution.executedPlan
+      val logicalPlan = df.queryExecution.analyzed
+      
+      val execFallback = analyzeFallback(executedPlan)
+      val logicalFallback = analyzeLogicalFallback(logicalPlan)
+      
+      // Merge fallback info - prefer logical plan reasons if available
+      if (logicalFallback.hasFallback) {
+        Some(logicalFallback)
+      } else {
+        Some(execFallback)
+      }
     } else {
       None
     }
@@ -322,9 +499,18 @@ trait GlutenBenchmarkBase extends BenchmarkBase {
         .config("spark.shuffle.manager", "org.apache.spark.shuffle.sort.ColumnarShuffleManager")
         .config("spark.memory.offHeap.enabled", "true")
         .config("spark.memory.offHeap.size", "6g")
+        // Enable fallback reporting for better diagnostics
+        .config("spark.gluten.ui.enabled", "true")
     }
 
-    builder.getOrCreate()
+    val spark = builder.getOrCreate()
+    
+    // Register fallback listener for Gluten sessions
+    if (glutenEnabled && glutenFallbackEventClass.isDefined) {
+      registerFallbackListener(spark)
+    }
+    
+    spark
   }
 
   // ============================================================

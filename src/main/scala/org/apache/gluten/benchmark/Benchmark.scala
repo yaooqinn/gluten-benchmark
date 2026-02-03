@@ -215,12 +215,20 @@ case class BenchmarkResult(
 case class FallbackInfo(
     glutenNodes: Int,
     totalNodes: Int,
-    fallbackNodes: Seq[String]) {
-  def hasFallback: Boolean = fallbackNodes.nonEmpty
+    fallbackNodes: Seq[String],
+    fallbackReasons: Map[String, String] = Map.empty) {
+  def hasFallback: Boolean = fallbackNodes.nonEmpty || fallbackReasons.nonEmpty
   def fallbackRatio: Double = if (totalNodes > 0) fallbackNodes.size.toDouble / totalNodes else 0.0
   def summary: String = {
-    if (fallbackNodes.isEmpty) "No fallback"
-    else s"${fallbackNodes.size} fallback nodes: ${fallbackNodes.distinct.mkString(", ")}"
+    if (fallbackReasons.nonEmpty) {
+      // Use Gluten's detailed fallback reasons
+      val reasons = fallbackReasons.values.toSeq.distinct.take(3)
+      s"${fallbackReasons.size} fallbacks: ${reasons.mkString("; ")}"
+    } else if (fallbackNodes.nonEmpty) {
+      s"${fallbackNodes.size} fallback nodes: ${fallbackNodes.distinct.mkString(", ")}"
+    } else {
+      "No fallback"
+    }
   }
 }
 
