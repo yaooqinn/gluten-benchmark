@@ -39,12 +39,12 @@ jobs:
     timeout-minutes: 60
     strategy:
       matrix:
-        # Run 3.5.5 daily, all versions on manual trigger
-        spark: ${{ github.event_name == 'schedule' && fromJSON('["3.5.5"]') || fromJSON('["3.4.4", "3.5.5", "4.0.0"]') }}
+        # Run all Spark versions daily for comparison
+        spark: ['3.4.4', '3.5.5', '4.0.0']
         # Split benchmarks across parallel jobs for speed
         suite: ['aggregate', 'string', 'map', 'explode', 'higherorder', 'array']
       fail-fast: false
-      max-parallel: 6
+      max-parallel: 18
 
     steps:
       - name: Checkout benchmark repo
