@@ -157,11 +157,11 @@ jobs:
           path: benchmarks/
 
       - name: Commit results (if on main)
-        if: github.ref == 'refs/heads/main' && github.event_name == 'schedule'
+        if: github.ref == 'refs/heads/main'
         run: |
           git config user.name "GitHub Actions"
           git config user.email "actions@github.com"
           
           git add benchmarks/
-          git diff --staged --quiet || git commit -m "Daily benchmark results $(date +%Y-%m-%d)"
+          git diff --staged --quiet || git commit -m "Benchmark results $(date +%Y-%m-%d) [${{ github.event_name }}]"
           git push || echo "Push failed - may need manual intervention"

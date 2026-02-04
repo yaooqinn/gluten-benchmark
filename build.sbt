@@ -99,8 +99,15 @@ lazy val root = (project in file("."))
     // Handle dependency version conflicts (Spark 4.0 has stricter requirements)
     libraryDependencySchemes += "com.github.luben" % "zstd-jni" % VersionScheme.Always,
     
-    // Enable benchmark result generation
-    Test / envVars += "SPARK_GENERATE_BENCHMARK_FILES" -> sys.env.getOrElse("SPARK_GENERATE_BENCHMARK_FILES", "0"),
+    // Enable benchmark result generation (pass env vars to forked JVM)
+    Compile / run / envVars ++= Map(
+      "SPARK_GENERATE_BENCHMARK_FILES" -> sys.env.getOrElse("SPARK_GENERATE_BENCHMARK_FILES", "0"),
+      "SPARK_BENCHMARK_DATE" -> sys.env.getOrElse("SPARK_BENCHMARK_DATE", "")
+    ),
+    Test / envVars ++= Map(
+      "SPARK_GENERATE_BENCHMARK_FILES" -> sys.env.getOrElse("SPARK_GENERATE_BENCHMARK_FILES", "0"),
+      "SPARK_BENCHMARK_DATE" -> sys.env.getOrElse("SPARK_BENCHMARK_DATE", "")
+    ),
     
     // Output benchmark results to benchmarks/ directory
     Test / baseDirectory := (ThisBuild / baseDirectory).value,
