@@ -32,6 +32,30 @@ import scala.collection.mutable
  */
 trait GlutenBenchmarkBase extends BenchmarkBase {
 
+  // ANSI color codes for terminal output
+  protected object Colors {
+    // Check if colors should be disabled
+    private val noColor = sys.env.get("NO_COLOR").isDefined || 
+      sys.env.getOrElse("TERM", "") == "dumb"
+    
+    private def color(code: String): String = if (noColor) "" else code
+    
+    val RESET: String = color("\u001b[0m")
+    val BOLD: String = color("\u001b[1m")
+    val DIM: String = color("\u001b[2m")
+    
+    // Bright colors for better visibility on dark terminals
+    val CYAN: String = color("\u001b[96m")
+    val GREEN: String = color("\u001b[92m")
+    val YELLOW: String = color("\u001b[93m")
+    val MAGENTA: String = color("\u001b[95m")
+    val WHITE: String = color("\u001b[97m")
+    val RED: String = color("\u001b[91m")
+    val BLUE: String = color("\u001b[94m")
+  }
+
+  import Colors._
+
   /** Default cardinality for benchmarks */
   def defaultCardinality: Long = 10000000L
 
@@ -303,7 +327,7 @@ trait GlutenBenchmarkBase extends BenchmarkBase {
     }
 
     if (toRun.isEmpty) {
-      println(s"No benchmarks matched filter: ${filter.getOrElse("(none)")}")
+      println(s"${YELLOW}No benchmarks matched filter: ${filter.getOrElse("(none)")}${RESET}")
       println(s"Available benchmarks: ${benchmarks.map(_.name).mkString(", ")}")
       return
     }
@@ -320,9 +344,9 @@ trait GlutenBenchmarkBase extends BenchmarkBase {
       benchDefs: Seq[BenchmarkDef],
       vanillaOnly: Boolean = false): Unit = {
     // Phase 1: Run all benchmarks on Vanilla Spark
-    println(s"\n${"=" * 80}")
-    println("Running benchmarks with Vanilla Spark")
-    println("=" * 80)
+    println(s"\n${CYAN}${"=" * 80}${RESET}")
+    println(s"${BOLD}${BLUE}Running benchmarks with Vanilla Spark${RESET}")
+    println(s"${CYAN}${"=" * 80}${RESET}")
     
     val vanillaSpark = createSparkSession(glutenEnabled = false)
     val vanillaResults = try {
@@ -337,14 +361,14 @@ trait GlutenBenchmarkBase extends BenchmarkBase {
 
     // Phase 2: Run all benchmarks on Gluten + Velox (if available)
     val glutenResults: Seq[BenchmarkResult] = if (vanillaOnly) {
-      println(s"\n${"=" * 80}")
-      println("Skipping Gluten benchmarks (Vanilla-only mode)")
-      println("=" * 80)
+      println(s"\n${CYAN}${"=" * 80}${RESET}")
+      println(s"${YELLOW}Skipping Gluten benchmarks (Vanilla-only mode)${RESET}")
+      println(s"${CYAN}${"=" * 80}${RESET}")
       Seq.empty[BenchmarkResult]
     } else {
-      println(s"\n${"=" * 80}")
-      println("Running benchmarks with Gluten + Velox")
-      println("=" * 80)
+      println(s"\n${CYAN}${"=" * 80}${RESET}")
+      println(s"${BOLD}${MAGENTA}Running benchmarks with Gluten + Velox${RESET}")
+      println(s"${CYAN}${"=" * 80}${RESET}")
       val glutenSpark = createSparkSession(glutenEnabled = true)
       try {
         benchDefs.map { benchDef =>
@@ -423,10 +447,11 @@ trait GlutenBenchmarkBase extends BenchmarkBase {
     
     // Print profiling info with fallback indicator
     val fallbackStr = fallbackInfo match {
-      case Some(info) if info.hasFallback => s" [FALLBACK: ${info.fallbackNodes.distinct.size} types]"
+      case Some(info) if info.hasFallback => 
+        s" ${YELLOW}[FALLBACK: ${info.fallbackNodes.distinct.size} types]${RESET}"
       case _ => ""
     }
-    println(f"  ${benchDef.name}%-45s $best%10.0f ms (best)  $avg%10.0f ms (avg)  [plan: $planTimeMs%.0fms, first: $firstExecMs%.0fms]$fallbackStr")
+    println(f"  ${DIM}${benchDef.name}%-45s${RESET} ${GREEN}$best%10.0f ms${RESET} (best)  $avg%10.0f ms (avg)  ${DIM}[plan: $planTimeMs%.0fms, first: $firstExecMs%.0fms]${RESET}$fallbackStr")
     
     BenchmarkResult(benchDef.name, best, avg, stddev, 1.0, fallbackInfo)
   }

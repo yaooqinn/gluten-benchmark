@@ -35,6 +35,30 @@ import java.time.format.DateTimeFormatter
  */
 object RunAllBenchmarksFast {
 
+  // ANSI color codes for terminal output
+  private object Colors {
+    // Check if colors should be disabled
+    private val noColor = sys.env.get("NO_COLOR").isDefined || 
+      sys.env.getOrElse("TERM", "") == "dumb"
+    
+    private def color(code: String): String = if (noColor) "" else code
+    
+    val RESET: String = color("\u001b[0m")
+    val BOLD: String = color("\u001b[1m")
+    val DIM: String = color("\u001b[2m")
+    
+    // Bright colors for better visibility on dark terminals
+    val CYAN: String = color("\u001b[96m")       // Bright cyan
+    val GREEN: String = color("\u001b[92m")      // Bright green
+    val YELLOW: String = color("\u001b[93m")     // Bright yellow
+    val MAGENTA: String = color("\u001b[95m")    // Bright magenta
+    val WHITE: String = color("\u001b[97m")      // Bright white
+    val RED: String = color("\u001b[91m")        // Bright red
+    val BLUE: String = color("\u001b[94m")       // Bright blue
+  }
+
+  import Colors._
+
   // Registry of all benchmark objects
   private val allBenchmarks: Seq[GlutenBenchmarkBase] = Seq(
     aggregate.AggregateBenchmark,
@@ -64,18 +88,18 @@ object RunAllBenchmarksFast {
 
     if (toRun.isEmpty) {
       // scalastyle:off println
-      println(s"No benchmarks matched filter: ${filter.getOrElse("(none)")}")
+      println(s"${YELLOW}No benchmarks matched filter: ${filter.getOrElse("(none)")}${RESET}")
       println(s"Available: ${allBenchmarks.map(_.getClass.getSimpleName).mkString(", ")}")
       // scalastyle:on println
       return
     }
 
     // scalastyle:off println
-    println(s"Running ${toRun.size} benchmark suite(s) with shared sessions...")
+    println(s"${BOLD}${CYAN}Running ${toRun.size} benchmark suite(s) with shared sessions...${RESET}")
     if (generateFiles) {
-      println(s"Results will be saved to benchmarks/$benchmarkDate/")
+      println(s"${DIM}Results will be saved to benchmarks/$benchmarkDate/${RESET}")
     }
-    println("=" * 80)
+    println(s"${CYAN}${"=" * 80}${RESET}")
     // scalastyle:on println
 
     val startTime = System.currentTimeMillis()
@@ -92,14 +116,14 @@ object RunAllBenchmarksFast {
     val allResults = scala.collection.mutable.Map[String, (Seq[BenchmarkTiming], Seq[BenchmarkTiming])]()
 
     // Phase 1: Run all suites with Vanilla Spark (single session)
-    println("\n" + "=" * 80)
-    println("Phase 1: Running all benchmarks with Vanilla Spark")
-    println("=" * 80)
+    println(s"\n${CYAN}${"=" * 80}${RESET}")
+    println(s"${BOLD}${BLUE}Phase 1: Running all benchmarks with Vanilla Spark${RESET}")
+    println(s"${CYAN}${"=" * 80}${RESET}")
     
     val vanillaSpark = createVanillaSession()
     val vanillaResults = try {
       toRun.map { benchmark =>
-        println(s"\n>>> ${benchmark.getClass.getSimpleName}")
+        println(s"\n${BOLD}${WHITE}>>> ${benchmark.getClass.getSimpleName}${RESET}")
         val results = runBenchmarksWithSession(benchmark, vanillaSpark, isGluten = false)
         (benchmark.getClass.getSimpleName.replace("$", ""), results)
       }.toMap
@@ -111,14 +135,14 @@ object RunAllBenchmarksFast {
 
     // Phase 2: Run all suites with Gluten (single session)
     val glutenResults = if (glutenAvailable) {
-      println("\n" + "=" * 80)
-      println("Phase 2: Running all benchmarks with Gluten + Velox")
-      println("=" * 80)
+      println(s"\n${CYAN}${"=" * 80}${RESET}")
+      println(s"${BOLD}${MAGENTA}Phase 2: Running all benchmarks with Gluten + Velox${RESET}")
+      println(s"${CYAN}${"=" * 80}${RESET}")
       
       val glutenSpark = createGlutenSession()
       try {
         toRun.map { benchmark =>
-          println(s"\n>>> ${benchmark.getClass.getSimpleName}")
+          println(s"\n${BOLD}${WHITE}>>> ${benchmark.getClass.getSimpleName}${RESET}")
           val results = runBenchmarksWithSession(benchmark, glutenSpark, isGluten = true)
           (benchmark.getClass.getSimpleName.replace("$", ""), results)
         }.toMap
@@ -128,7 +152,7 @@ object RunAllBenchmarksFast {
         SparkSession.clearDefaultSession()
       }
     } else {
-      println("\n[WARN] Gluten not available - skipping Gluten benchmarks")
+      println(s"\n${YELLOW}[WARN] Gluten not available - skipping Gluten benchmarks${RESET}")
       Map.empty[String, Seq[BenchmarkTiming]]
     }
 
@@ -139,10 +163,10 @@ object RunAllBenchmarksFast {
 
     // Print summary
     val totalTime = (System.currentTimeMillis() - startTime) / 1000.0
-    println("\n" + "=" * 80)
-    println(f"All ${toRun.size} suites completed in $totalTime%.1f seconds")
-    println(s"Total benchmarks: ${vanillaResults.values.map(_.size).sum} Vanilla, ${glutenResults.values.map(_.size).sum} Gluten")
-    println("=" * 80)
+    println(s"\n${CYAN}${"=" * 80}${RESET}")
+    println(f"${BOLD}${GREEN}All ${toRun.size} suites completed in $totalTime%.1f seconds${RESET}")
+    println(s"${WHITE}Total benchmarks: ${vanillaResults.values.map(_.size).sum} Vanilla, ${glutenResults.values.map(_.size).sum} Gluten${RESET}")
+    println(s"${CYAN}${"=" * 80}${RESET}")
   }
 
   case class BenchmarkTiming(name: String, bestMs: Double, avgMs: Double, stddevMs: Double)
@@ -203,10 +227,10 @@ object RunAllBenchmarksFast {
       val best = times.min
       val avg = times.sum / times.length
       val stddev = math.sqrt(times.map(t => math.pow(t - avg, 2)).sum / times.length)
-      val label = if (isGluten) "Gluten" else "Vanilla"
+      val (labelColor, label) = if (isGluten) (MAGENTA, "Gluten") else (BLUE, "Vanilla")
       
       // scalastyle:off println
-      println(f"  ${benchDef.name}%-45s $best%8.0f ms (best)  $avg%8.0f ms (avg)  [$label]")
+      println(f"  ${DIM}${benchDef.name}%-45s${RESET} ${GREEN}$best%8.0f ms${RESET} (best)  $avg%8.0f ms (avg)  ${labelColor}[$label]${RESET}")
       // scalastyle:on println
       
       BenchmarkTiming(benchDef.name, best, avg, stddev)
@@ -221,7 +245,7 @@ object RunAllBenchmarksFast {
     outputDir.mkdirs()
     
     // scalastyle:off println
-    println(s"\nSaving results to ${outputDir.getAbsolutePath}/")
+    println(s"\n${DIM}Saving results to ${outputDir.getAbsolutePath}/${RESET}")
     // scalastyle:on println
     
     vanillaResults.foreach { case (suiteName, vanillaTimes) =>
@@ -259,7 +283,7 @@ object RunAllBenchmarksFast {
       }
       
       // scalastyle:off println
-      println(s"  Saved: ${outputFile.getName}")
+      println(s"  ${GREEN}Saved:${RESET} ${outputFile.getName}")
       // scalastyle:on println
     }
   }
